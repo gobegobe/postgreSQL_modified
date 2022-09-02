@@ -420,10 +420,10 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	// TODO: 也许开头可以用一个类来保存整个改动中写死的部分
 	// 在这里把写死的和不写死的分开
 	
-	
+	/*
 	if (parse->jointree->quals != NULL)
 		lf_index_list = add_quals_using_label_range(parse);
-	
+	*/
 
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL,
