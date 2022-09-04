@@ -7,23 +7,36 @@
 
 typedef struct InferInfo {
     NodeTag type;
-    List *splitable_relids;  // feature 相关的 relid
-    List *min_values;        // splitable_relids 中每个表的最小值，一一对应
-    List *max_values;        // splitable_relids 中每个表的最大值，一一对应
+    int feature_num;
+    int splitable_relids[4];  // feature 相关的 relid
+    double min_values[4];        // splitable_relids 中每个表的最小值，一一对应
+    double max_values[4];        // splitable_relids 中每个表的最大值，一一对应
 } InferInfo;
 
+typedef struct FilterInfo {
+    NodeTag type;
+    List *shadow_roots;      // 自顶向下推 Filter 的起点(一些Shadow_plan) 的列表
+    List *filter_ops;        // 与 shadow_roots 一一对应, 需要向下推的 Filter
+                             // 注意, 这里使用双列表设计的原因是一个 shadow_root 可能对应多个 filter
+} FilterInfo;
+
+void Init_inferinfo(InferInfo* ifi, Query* parse);
 
 Shadow_Plan *build_shadow_plan(Plan *curplan);
-OpExpr *find_sole_op(Shadow_Plan *cur);
+
+void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
+
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, List *splitable_relids);
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi);
+
 Expr *copy_op(Expr *cur);
 
-int find_value(List *splitable_relids, List *min_values, int relid);
-Const *my_make_const(int value);
-Const *copy_const_withdelta(Const *cur, int delta);
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, List *splitable_relids, List *min_values, int *deleted_value);
-void collect_relid(Expr *cur, List *lst);
+double find_min_value(InferInfo *ifi, int relid);
+double find_max_value(InferInfo *ifi, int relid);
+
+Const *copy_const_withdelta(Const *cur, double delta);
+
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *deleted_value);
 
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInfo *ifi, OpExpr **subop, int depth);
 
@@ -32,4 +45,6 @@ OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt);
 
 Expr *copy_and_reserve(Expr *cur, int reserve_relid) ;
 
+// 关于建立节点
 
+Const *my_make_const(int value);

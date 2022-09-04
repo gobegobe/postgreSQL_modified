@@ -290,18 +290,17 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	Path	   *best_path;
 	Plan	   *top_plan;
 
-	int i;
 	ListCell   *lp,
 			   *lr;
+
 	Shadow_Plan *shadow;
-	List *splitable_relids;
-	List *min_values;
-	List *max_values;
+	
 	List *lf_index_list;
 	OpExpr *planop;
 	OpExpr *whatever_subop;
-	InferInfo *inferinfo;
 
+	InferInfo *inferinfo;
+	FilterInfo *fi;
 
 	/*
 	 * Set up global state for this planner invocation.  This data is needed
@@ -424,7 +423,10 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	if (parse->jointree->quals != NULL)
 		lf_index_list = add_quals_using_label_range(parse);
 	*/
-
+	
+	inferinfo = makeNode(InferInfo);
+	Init_inferinfo(inferinfo, parse);
+	
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL,
 							false, tuple_fraction);
@@ -437,40 +439,37 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	shadow = build_shadow_plan(top_plan);
 	elog(LOG, "shadow = %p", shadow);
 
-	/*
+	
 	if (top_plan->type == T_NestLoop) {
-		splitable_relids = list_make1(NULL);
+		
 		
 		// TODO: 需要解决 JOB 数据中：可能存在多个 Filter / 需要检索到目标 Filter 的问题
 		// 思路1: 把 Filter 放在第一个或者是最后一个（如果 Inference 是来自 UDF 则直接确定）
 		// 思路2: 我们只选了 4 个 feature，可以考虑选择 len(splitable_relids) == 4 的那个 Filter
-		planop = find_sole_op(shadow);	
+		
+		// Step1: 先找到哪些节点需要下推 Filter
+		fi = makeNode(FilterInfo);
+		fi->shadow_roots = NULL;
+		fi->filter_ops = NULL;
+		find_sole_op(shadow, fi);	
 
-		collect_relid((Expr *)planop, splitable_relids);
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, splitable_relids);
+		// Step2: 从 fi 中寻找到对应的 relids
+		// 考虑到目前所有的 Filter 都使用的是相同的 relid, 不妨就从 fi 的第一个里面找
 
+		find_split_node(shadow, shadow, shadow->plan->plan_rows, inferinfo);
 		
 		// TODO: 现在 min/max 都是1，需要获得 Range
 		// 思路1: 可以暴力的和已经写死的数据进行比较来获得 feature 的范围
 
-		min_values = list_make1(0);
-		max_values = list_make1(0);
-		for (i = 1; i < splitable_relids->length; i += 1) {
-			min_values = lappend_int(min_values, 1);
-			max_values = lappend_int(max_values, 1);
-		}
-		inferinfo = makeNode(InferInfo);
-		inferinfo->splitable_relids = splitable_relids;
-		inferinfo->min_values = min_values;
-		inferinfo->max_values = max_values;
+		// Step3: 将 Split 相关的relid添加到信息中; 
+		// 		  将 min_values/max_values 添加到信息中
+		// 这一段在上面的 init_inferinfo 中处理
+		
 
-
-		// assign_value_range(shadow, inferinfo);
-		distribute_joinqual_shadow(shadow, NULL, inferinfo, &whatever_subop, 1);
+		// Step4: 自顶向下将 Filter 向下分发
+		distribute_joinqual_shadow(linitial(fi->shadow_roots), NULL, inferinfo, &whatever_subop, 1);
 		elog(LOG, "OK, I Reached checkpoint 1, How I wish can success.");
 	}
-	*/
-	
 	elog(LOG, "OK, I Reached checkpoint 2, How I wish can success.");
 	
 	

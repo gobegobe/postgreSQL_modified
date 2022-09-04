@@ -26,18 +26,63 @@
 #include "optimizer/prep.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
+#include "optimizer/lfindex.h"
 
-/*
- * Build a ShadowPlan Tree from a Plan Tree.
+void Init_inferinfo(InferInfo* ifi, Query* parse)
+{
+    RangeTblEntry *rte;
+    ListCell *lc;
+    int i = 0;
+
+    /*  当前各表对应的 Oid
+		16493, // title::production_year
+		30055, // votes
+		30061, // budget
+		30069	// gross
+	*/
+    ifi->feature_num = 4;
+    i = 0;
+	foreach(lc, parse->rtable)
+	{
+		rte = (RangeTblEntry *) lfirst(lc);
+		i += 1;
+		switch(rte->relid)
+		{
+			case 16493:
+				ifi->splitable_relids[0] = i;
+				break;
+			case 30055:
+				ifi->splitable_relids[1] = i;
+				break;
+			case 30061:
+				ifi->splitable_relids[2] = i;
+				break;
+			case 30069:
+				ifi->splitable_relids[3] = i;
+				break;
+			default:
+				break;
+		}
+	}
+
+    for (i = 0; i < 4; i++)
+    {
+        ifi->min_values[i] = 1.0;
+        ifi->max_values[i] = 1.0;
+    }
+}
+
+/* build_shadow_plan: Build a ShadowPlan Tree from a Plan Tree.
+ * [in] curplan: 所要构建的影子树的根节点指针
+ * [return] 构建所得的影子树的根节点指针
  */
 
-Shadow_Plan *build_shadow_plan(Plan *curplan) {
-
+Shadow_Plan *build_shadow_plan(Plan *curplan) 
+{
 	// 变量定义
 	Shadow_Plan *res;
 	// 变量定义结束
 	if (curplan == NULL) return (Shadow_Plan*) NULL;
-
 
 	res = makeNode(Shadow_Plan);
 	res->spliters = NULL;
@@ -50,50 +95,64 @@ Shadow_Plan *build_shadow_plan(Plan *curplan) {
 }
 
 
-OpExpr *find_sole_op(Shadow_Plan *cur) {
+/* find_sole_op: 一个工具函数, 找到整棵 Plan 树中的那个 Filter
+ * 在 JOB 中, 选择找到那个 "小于不等式" 或 "大于不等式" 所对应的 Filter
+ * [in] cur: 当前递归栈中所考虑的节点
+ * [out] fi: 所找到的 filter 信息, 用于输出
+ */
+void find_sole_op(Shadow_Plan *cur, FilterInfo *fi) 
+{
 
-    List *joinqual;
-    OpExpr *res1;
-    OpExpr *res2;
+    ListCell *lc;
+    NestLoop *nsl;
+    OpExpr *op;
 
-    if (cur->plan->type != T_NestLoop)
-        return NULL;
-    
-    joinqual = ((NestLoop*) cur->plan)->join.joinqual;
-    if (joinqual != NULL)
-        return (OpExpr *) linitial(joinqual);
+    // 现在只考虑 NestLoop
+    // 如果当前节点是 Join 的话, 则需要考虑它上面的 Filter
+    if (IsA(cur->plan, NestLoop))
+    {
+        nsl = (NestLoop*)cur->plan;
+        foreach(lc, nsl->join.joinqual)
+        {
+            if (IsA(lfirst(lc), OpExpr))
+            {
+                op = (OpExpr *) lfirst(lc);
+                if (op->opno == 1755 || op->opno == 1757)
+                {
+                    fi->shadow_roots = lappend(fi->shadow_roots, cur);
+                    fi->filter_ops = lappend(fi->filter_ops, op);
+                }
+                    
+            }
+        }
+    }
     
     if (cur->lefttree)
-    {
-        res1 = find_sole_op(cur->lefttree);
-        if (res1)
-            return res1;
-    }
+        find_sole_op(cur->lefttree, fi);
     if (cur->righttree)
-    {
-        res2 = find_sole_op(cur->righttree);
-        if (res2)
-            return res2;
-    }
-    return NULL;
+        find_sole_op(cur->righttree, fi);
 }
 
-
-
-/* 
-    在计划树上寻找 Split Node
+/* find_split_node: 在计划树上寻找 Split Node
+ * [in] cur_plan: 当前递归栈中国所考虑的影子树节点
+ * [in] minrows_node: 当前递归栈中, 从根节点到 cur_plan 上, rows 最小的那个节点
+ * [in] min_rows: 当前递归栈中 minrows_node 对应的节点所对应的 rows
+ * [in] splitable_relids: 被 Split Node 所考虑的那些 relid, 对于一个 Scan 节点而言, 
+        只有当它所扫描的那个表在 splitable_relids 中的时候, 才会被某个中间的 SplitNode 所考虑
  */
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, List *splitable_relids) {
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi) 
+{
 
     // 当前进行了很大程度上的简化：假定计划树上的节点只有
     // 1. NestLoop Join 节点
     // 2. 一些 Scan 节点，包括 IndexScan 和 SeqScan
     int relid;
+    int i;
+    bool is_member;
 
-
-	if (cur_plan->plan->type == T_NestLoop) {
+	if (nodeTag(cur_plan->plan) == T_NestLoop) {
 		Shadow_Plan *next_node = minrows_node;
 		double next_minrows = min_rows;
 		if (cur_plan->plan->plan_rows <= min_rows) {
@@ -101,9 +160,9 @@ void find_split_node
 			next_node = cur_plan;
 		}
 		if (cur_plan->lefttree != NULL)
-			find_split_node(cur_plan->lefttree, next_node, next_minrows, splitable_relids);
+			find_split_node(cur_plan->lefttree, next_node, next_minrows, ifi);
 		if (cur_plan->righttree != NULL)
-			find_split_node(cur_plan->righttree,  next_node, next_minrows, splitable_relids);
+			find_split_node(cur_plan->righttree,  next_node, next_minrows, ifi);
 		return;
 	}
 
@@ -111,43 +170,18 @@ void find_split_node
     // Shadow_plan 的 spliters 这个域一开始是 NULL
     // 这样做的好处之一是可以判断一个节点是否为 SplitNode 
 
-    relid = ((IndexScan*)cur_plan->plan)->scan.scanrelid;
-    if (!list_member_int(splitable_relids, relid))
-        return;
+    relid = ((Scan*)cur_plan->plan)->scanrelid;
+    is_member = false;
 
-    if (minrows_node->spliters == NULL) {
-        minrows_node->spliters = list_make1((void *) cur_plan);
+    for (i = 0; i < ifi->feature_num; i++) {
+        if (relid == ifi->splitable_relids[i])
+            is_member = true;
     }
-    else {
-        minrows_node->spliters = lappend(minrows_node->spliters, (void *)cur_plan);
-    }
+
+    if (!is_member) return;
+
+    minrows_node->spliters = lappend(minrows_node->spliters, (void *)cur_plan);
 }
-
-void collect_relid(Expr *cur, List *lst) {
-
-    Var *cur_var;
-    OpExpr *cur_op;
-
-    switch (cur->type) {
-
-        case T_Const:
-            return;
-        case T_Var:
-            cur_var = (Var *) cur;
-            lappend_int(lst, (int) cur_var->varno);
-            break;
-        case T_OpExpr:
-
-            cur_op = (OpExpr *) cur;
-            collect_relid(cur_op->args->elements[0].ptr_value, lst);
-            collect_relid(cur_op->args->elements[1].ptr_value, lst);
-            break;
-        default:
-            break;
-    }
-
-}
-
 
 // ==============================================
 /*  copy_op
@@ -199,50 +233,42 @@ Expr *copy_op(Expr *cur) {
     assert(false);
 }
 
-Const *copy_const_withdelta(Const *cur, int delta) {
 
-    Const *res;
-    res = makeNode(Const);
-    memcpy(res, cur, sizeof(Const));
-    res->constvalue = cur->constvalue + delta;
-    return res;
-}
-
-Const *my_make_const(int value) {
-    Const *res;
-
-    res = makeNode(Const);
-    res->consttype = 23;
-    res->consttypmod = -1;
-    res->constcollid = 0;
-    res->constlen = 4;
-    res->constvalue = value;
-    res->constisnull = false;
-    res->constbyval = true;
-    res->location = -1;
-    return res;
-}
 
 /* find_value：根据传入的条件寻找某一列的min值
+ * Parameter:
  * [in] splitable_relids: 需要考虑的 feature 的 relid
  * [in] min_values: 与splitable_relids 一一对应，保存relid 对应的min value值
  * [in] relid: 目标的最小id
  * [out] return: relid对应的 min value 值
  */
 
-int find_value(List *splitable_relids, List *values, int relid) {
-    ListCell *cell1;
-    ListCell *cell2;
+double find_min_value(InferInfo *ifi, int relid) {
     int cur_relid;
-    int cur_min;
+    int i;
 
-    forboth(cell1, splitable_relids, cell2, values) {
-        cur_relid = lfirst_int(cell1);
-        cur_min = lfirst_int(cell2);
+    for (i = 0; i < ifi->feature_num; i++)
+    {
+        cur_relid = ifi->splitable_relids[i];
         if (cur_relid == relid)
-            return cur_min;
+            return ifi->min_values[i];
+        i += 1;
     }
-    return 10;
+    return 10.00; // just for debug, should not reach here.
+}
+
+double find_max_value(InferInfo *ifi, int relid) {
+    int cur_relid;
+    int i;
+
+    for (i = 0; i < ifi->feature_num; i++)
+    {
+        cur_relid = ifi->splitable_relids[i];
+        if (cur_relid == relid)
+            return ifi->max_values[i];
+        i += 1;
+    }
+    return 10.00; // just for debug, should not reach here.
 }
 
 
@@ -256,10 +282,10 @@ int find_value(List *splitable_relids, List *values, int relid) {
  */
 
 
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, List *splitable_relids, List *min_values, int *deleted_value) 
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *deleted_value) 
 {
     // 变量定义
-    int del_value_fromnow;
+    double del_value_fromnow;
     Expr *left;
     Expr *right;
     Expr *lresult;
@@ -267,21 +293,34 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, List *splitable_relids, Li
 
     OpExpr *res;
     OpExpr *opcur;
+
+    Var *vr;
     // 变量定义结束
 
     if (cur->type == T_Const) // 常量节点
     {
-        return cur;
+        return copyObject(cur);
     }
     else if (cur->type == T_Var) // feature 节点
     {
         if ( ((Var*)cur)->varno == delete_relid) // 当前的 Var 需要被去除
         {
-            (*deleted_value) += find_value(splitable_relids, min_values, delete_relid);
+            (*deleted_value) += find_min_value(ifi, delete_relid);
             return NULL;
         }
         else
-            return cur;
+            return copyObject(cur);
+    }
+    else if (cur->type == T_FuncExpr)
+    {
+        vr = (Var *) linitial(((FuncExpr *)cur)->args);
+        if (vr->varno == delete_relid)
+        {
+            (*deleted_value) += find_min_value(ifi, delete_relid);
+            return NULL;
+        }
+        else   
+            return copyObject(cur);
     }
     // else： 现在 cur 可以确定为 OpExpr
     
@@ -292,30 +331,27 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, List *splitable_relids, Li
     left = (Expr*) linitial(opcur->args);
     right =  (Expr*) lsecond(opcur->args);
 
-    del_value_fromnow = 0;
-
     // res 首先为当前节点 cur 的复制, 一个细节是这里把args复制了, 它是一个必要的操作
-    res = makeNode(OpExpr);
-    memcpy(res, opcur, sizeof(OpExpr));
-    res->args = list_copy(opcur->args);
+    res = copyObject(opcur);
+
+    del_value_fromnow = 0;
 
     switch (opcur->opno) 
     {
-        case 97:    // '<' for integer
-
+        case 1755:    // '<=' for NUMERIC
+        case 1757:    // '>=' for NUMERIC
             // 现在假设任何 < 号右侧都是一个常数，且 < 永远在 OpExpr 的根节点
-            linitial(res->args) = copy_and_delete_op(
-                linitial(res->args), delete_relid, splitable_relids, min_values, &del_value_fromnow);
+            linitial(res->args) = copy_and_delete_op(linitial(res->args), delete_relid, ifi, &del_value_fromnow);
             lsecond(res->args) = copy_const_withdelta((Const*)lsecond(res->args), -del_value_fromnow);
             return (Expr *)res;
             break;
         
-        case 551:   // '+' for integer
+        case 1758:   // '+' for NUMERIC
 
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, splitable_relids, min_values, &del_value_fromnow);     
+                linitial(res->args), delete_relid, ifi, &del_value_fromnow);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, splitable_relids, min_values, &del_value_fromnow);
+                lsecond(res->args), delete_relid, ifi, &del_value_fromnow);
 
             (*deleted_value) += del_value_fromnow;
 
@@ -325,42 +361,45 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, List *splitable_relids, Li
                 return rresult;
             else if(rresult == NULL)
                 return lresult;
-            else {
+            else 
+            {
                 linitial(res->args) = lresult;
                 lsecond(res->args) = rresult;
                 return (Expr *)res;
             }
-                
-
             break;
             
-        case 514:   // '*' for integer
+        case 1760:   // '*' for NUMERIC
             // 对于 * 运算符, 暂时认为其左右节点中, 至少有一个是常数节点
 
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, splitable_relids, min_values, &del_value_fromnow);     
+                linitial(res->args), delete_relid, ifi, &del_value_fromnow);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, splitable_relids, min_values, &del_value_fromnow);
+                lsecond(res->args), delete_relid, ifi, &del_value_fromnow);
             
-            if (left->type == T_Const) {
-                (*deleted_value) += ((Const *)lresult)->constvalue * del_value_fromnow;
-            } else if (right->type == T_Const) {
-                (*deleted_value) += ((Const *)rresult)->constvalue * del_value_fromnow;
+            if (left->type == T_Const) 
+            {
+                (*deleted_value) += 
+                    constvalue_to_double(((Const *)lresult)->constvalue) * del_value_fromnow;
+            } 
+            else if (right->type == T_Const) 
+            {
+                (*deleted_value) += 
+                    constvalue_to_double(((Const *)rresult)->constvalue) * del_value_fromnow;
             }
-
-            
 
             if (lresult == NULL || rresult == NULL)
                 return NULL;
-            else {
+            else 
+            {
                 linitial(res->args) = lresult;
                 lsecond(res->args) = rresult;
                 return (Expr *)res;
             }
-                
             break;
 
         default:
+            elog(LOG, "Error 114514: Met some trouble...\n");
             assert(false);
             break;
     }
@@ -378,19 +417,17 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
 
     // 变量定义(为了遵循源代码风格)
     Plan *lefttree;
-    IndexScan *righttree;
+    Scan *righttree;
+    NestLoop *nsl;
 
     Expr *modified_op;
-    List *cur_joinqual;
-    void *origintp;
-    void *tptp;
     OpExpr *cur_expr; 
     OpExpr *middle_result;
     OpExpr *sub_result;
     OpExpr *individual_scan;
     OpExpr *cur_op;
 
-    int whatever;
+    double whatever;
     int i;
     TargetEntry *tnt; 
     int delete_relid;
@@ -403,9 +440,9 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     if (cur->spliters != NULL) 
     {
         // 未来修改方向：check list length
+        nsl = (NestLoop*) cur->plan;
         if (op_passed_tome != NULL) {
-            cur_joinqual = list_make1(op_passed_tome);
-            ((NestLoop*) cur->plan)->join.joinqual = cur_joinqual;
+            nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
         }
 
 
@@ -413,50 +450,44 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
 
         if (lefttree->type == T_NestLoop)
         {
-            righttree = (IndexScan*) cur->plan->righttree;
-            delete_relid = (righttree->scan).scanrelid;
+            righttree = (Scan*) cur->plan->righttree;
+            delete_relid = righttree->scanrelid;
 
             // TODO：如果右子树是一个无关表...
-            modified_op = copy_and_delete_op(
-                linitial( ((NestLoop*)cur->plan)->join.joinqual),
-                delete_relid, ifi->splitable_relids, ifi->min_values, &whatever
-            );
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
 
-            origintp = ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value;
-            tptp = copy_op( origintp );
-            ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value = tptp;
+            // origintp = ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value;
+            // tptp = copy_op( origintp );
+            // ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value = tptp;
 
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
-            i = cur->plan->targetlist->length;
-            individual_scan = (OpExpr *) 
-                copy_and_reserve(linitial( ((NestLoop*)cur->plan)->join.joinqual), delete_relid);
+            
 
+            // copy_and_reserve 直接返回的是一个加法表达式
+            individual_scan = (OpExpr *) copy_and_reserve(llast(nsl->join.joinqual), delete_relid);
             // 2 * x2 + x1 + 3 * x3 + 4 < 10
             // 当前右子树: scan ==> x1
             // copy_and_delete ==> 2 * x2 + 3 * x3 + 4 < 9
             // copy_and_reserve ==> (x1)
             // 修改后的 part infer filter : ((x1) + (2 * x2 + 3 * x3 + 4)) < 10
-
-            // copy_and_reserve 直接返回的是一个加法表达式
-            individual_scan = linitial(individual_scan->args);
-    
             middle_result = makeNode(OpExpr);
             
-            middle_result->opno = 551;
-            middle_result->opfuncid = 177;
-            middle_result->opresulttype = 23;
+            middle_result->opno = 1758;         // "+" for NUMERIC
+            middle_result->opfuncid = 1724;
+            middle_result->opresulttype = NUMERICOID;   
             middle_result->opretset = false;
             middle_result->opcollid = 0;
             middle_result->inputcollid = 0;
             middle_result->location = -1;
             middle_result->args = list_make2(sub_result, individual_scan);
 
+            i = cur->plan->targetlist->length;
             tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
             cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
             
-            cur_op = linitial( ((NestLoop*) cur->plan)->join.joinqual);
+            cur_op = llast(nsl->join.joinqual);
             linitial(cur_op->args) = middle_result;
 
             *subop = middle_result;
@@ -464,11 +495,12 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         
         else // 已经到达叶子
         {
-            i = cur->plan->targetlist->length;
-            cur_expr = linitial(((NestLoop*) cur->plan)->join.joinqual);
+            // nsl == current NeStedLoop node
+            i = ((Plan *)nsl)->targetlist->length;
+            cur_expr = llast(nsl->join.joinqual);
             middle_result = linitial(cur_expr->args);
             tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
-            cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
+            ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
             *subop = middle_result;
         }
 
@@ -478,63 +510,13 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         if (lefttree->type == T_NestLoop) 
         {
             distribute_joinqual_shadow(cur->lefttree, op_passed_tome, ifi, subop, depth + 1);
-
             i = cur->plan->targetlist->length;
             middle_result = *subop;
             tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
             cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
         }
-        // else : 是Scan 节点
+        // else : 是Scan 节点, do nothing
     }
-
-    if (depth == 1) 
-    {
-        list_delete_last(cur->plan->targetlist);
-    }
-    if (depth == 2)
-    {
-        cur->plan->targetlist = list_delete_nth_cell(
-            cur->plan->targetlist, 1
-        );
-    }
-    /*
-    if (depth == 1)
-    {
-        int temp1, temp2;
-        OpExpr *ano = copy_and_reserve(linitial( ((NestLoop*)cur->plan)->join.joinqual),
-            1, ifi, &temp1, &temp2);
-        OpExpr *adder1 = linitial(ano->args);
-        OpExpr *adder2 = ((TargetEntry *) lthird(cur->plan->targetlist))->expr;
-        OpExpr *sum = makeNode(OpExpr);
-        sum->opno = 551;
-        sum->opfuncid = 177;
-        sum->opresulttype = 23;
-        sum->opretset = false;
-        sum->opcollid = 0;
-        sum->inputcollid = 0;
-        sum->location = -1;
-        sum->args = list_make2(adder1, adder2);
-        ((NestLoop*) cur->plan)->join.joinqual = list_make1(
-            make_restrict(sum, true, 15)
-        );
-
-        cur->plan->targetlist = list_delete_nth_cell(
-            cur->plan->targetlist, 3
-        );
-
-        cur->plan->targetlist = list_delete_nth_cell(
-            cur->plan->targetlist, 2
-        );
-    }
-
-    
-    if (depth == 2)
-    {
-        cur->plan->targetlist = list_delete_nth_cell(
-            cur->plan->targetlist, 1
-        );
-    }
-    */
 }
 
 
@@ -549,10 +531,12 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
     OpExpr *res;
     OpExpr *opcur;
 
+    Var *vr;
     // 变量定义结束
 
-    if (cur->type == T_Const) // 常量节点需要进行删除
+    if (cur->type == T_Const) 
     {
+        // 常量节点本来需要进行删除, 但是考虑到乘法节点暂时不删除, 而是在加法节点中处理
         return cur;
     }
     else if (cur->type == T_Var) // feature 节点
@@ -562,29 +546,33 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
             return cur;
         }
         else
-        {
             return NULL;
+    }
+    else if (cur->type == T_FuncExpr)
+    {
+        vr = (Var *) linitial(((FuncExpr *)cur)->args);
+        if (vr->varno == reserve_relid)
+        {
+            return cur;
         }
+        else   
+            return NULL;
     }
 
     opcur = (OpExpr *) cur;
-
-    res = makeNode(OpExpr);
-    memcpy(res, opcur, sizeof(OpExpr));
-    res->args = list_copy(opcur->args);
+    res = copyObject(opcur);
 
     switch (opcur->opno) 
     {
-        case 97:    // '<' for integer
+        case 1755:    // '<=' for NUMERIC
+        case 1757:    // '>=' for NUMERIC
+            // 现在假设任何 <= 号右侧都是一个常数，且 <= 永远在 OpExpr 的根节点
+            linitial(res->args) = copy_and_reserve(linitial(res->args), reserve_relid);
 
-            // 现在假设任何 < 号右侧都是一个常数，且 < 永远在 OpExpr 的根节点
-            linitial(res->args) = copy_and_reserve(
-                linitial(res->args), reserve_relid);
-
-            return linitial(res->args); // 注意，这里返回的是根节点的左子树，可能为 NULL
+            return linitial(res->args); // 注意，这里返回的是根节点的左子树，即只保留 "lhs <= rhs" 中 lhs 这一部分
             break;
         
-        case 551:   // '+' for integer
+        case 1758:   // '+' for NUMERIC
 
             lresult = copy_and_reserve(
                 linitial(res->args), reserve_relid);     
@@ -593,9 +581,9 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
 
             if (lresult == NULL && rresult == NULL) 
                 return NULL;
-            else if(lresult == NULL)
+            else if(lresult == NULL || nodeTag(linitial(res->args)) == T_Const) // 特殊判断: 抛弃加法的 Const 节点
                 return rresult;
-            else if(rresult == NULL)
+            else if(rresult == NULL || nodeTag(lsecond(res->args)) == T_Const)  // 特殊判断: 抛弃加法的 Const 节点
                 return lresult;
             else {
                 linitial(res->args) = lresult;
@@ -605,7 +593,7 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
             
             break;
             
-        case 514:   // '*' for integer
+        case 1760:   // '*' for NUMERIC
             // 对于 * 运算符, 暂时认为其左右节点中, 至少有一个是常数节点
 
             lresult = copy_and_reserve(
@@ -629,7 +617,53 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
 }
 
 
+// ************** 关于 <构造节点> 的函数
+
+// TODO: 该函数需要支持 double
+/* copy_const_withdelta: 对于一个 Const 节点, 复制并更改它上面的值, 返回一个新的 Const 节点
+ * Paratemer:
+ * [in] cur: 构造新节点的基础节点
+ * [in] delta: 新节点的值 == (cur 节点上面的值 + delta)
+ * [return] 指向新节点的指针 (Const *)
+ */
+
+Const *copy_const_withdelta(Const *cur, double delta) {
+    double origin_value;
+    origin_value = constvalue_to_double(cur->constvalue);
+    return create_const_node(origin_value + delta);
+}
+
+/* collect_relid : 一个工具函数, 扫描一个 OpExpr, 并将其中所有的 Var->varno 添加到 lst 列表中
+ * [in] cur: 当前递归栈中所扫描的节点
+ * [out] lst: 列表, 所有 varno 都会被放到这个列表中
+ */
+
 /*
+void collect_relid(Expr *cur, List *lst) {
+
+    Var *cur_var;
+    OpExpr *cur_op;
+
+    switch (NodeTag(cur)) {
+
+        case T_Const:
+            return;
+        case T_Var:
+            cur_var = (Var *) cur;
+            if (!list_member_int(lst, (int) cur_var->varno))
+                lst = lappend_int(lst, (int) cur_var->varno);
+            break;
+        case T_OpExpr:
+            cur_op = (OpExpr *) cur;
+            collect_relid( linitial(cur_op->args), lst);
+            collect_relid( lsecond(cur_op->args), lst);
+            break;
+        default:
+            break;
+    }
+
+}
+
 OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt) {  // 最大值小于一个 Const
 
     OpExpr *res;
@@ -651,60 +685,4 @@ OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt) {  // 最大值小于�
     res->args = args;
     return res;
 }
-
-void assign_single_range(Plan *cur, InferInfo *ifi)
-{
-    IndexScan *idxcur;
-    int cur_relid;
-    OpExpr *min_restrict;
-    OpExpr *max_restrict;
-
-    switch (cur->type)
-    {
-        case T_IndexScan:
-            idxcur = (IndexScan *) cur;
-            cur_relid = idxcur->scan.scanrelid;
-            
-            min_restrict = make_restrict(cur_relid, false, 0);
-            max_restrict = make_restrict(cur_relid, true, 5);
-
-            if (cur->qual == NULL) {
-                cur->qual = list_make2(min_restrict, max_restrict);
-            } else {
-                cur->qual = lappend(cur->qual, min_restrict);
-                cur->qual = lappend(cur->qual, max_restrict);
-            }
-            break;
-        
-        default:
-            break;
-    }
-}
-
-void assign_value_range(Shadow_Plan *cur, InferInfo *ifi)
-{
-
-    // 变量定义(为了遵循源代码风格)
-    Plan *lefttree;
-    Plan *righttree;
-    // 变量定义结束
-
-    // 这里有一个先验知识：默认除了叶子节点的右子树都是 IndexScan
-    lefttree = cur->plan->lefttree;
-    righttree = cur->plan->righttree;
-    
-    assign_single_range(righttree, ifi);
-
-    if (lefttree->type == T_IndexScan) 
-    {
-        assign_single_range(lefttree, ifi);
-    }
-    else 
-    {
-        assign_value_range(cur->lefttree, ifi);
-    }
-    
-} 
-
-
 */

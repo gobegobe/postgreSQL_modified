@@ -531,6 +531,7 @@ typedef enum NodeTag
 
 	T_Shadow_Plan,
 	T_InferInfo,
+	T_FilterInfo,
 	T_LabelFeatureIndex
 } NodeTag;
 
