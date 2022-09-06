@@ -5865,7 +5865,7 @@ copyObjectImpl(const void *from)
 			break;
 
 		default:
-			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(from));
+			elog(ERROR, "<copyfuncs>unrecognized node type: %d", (int) nodeTag(from));
 			retval = 0;			/* keep compiler quiet */
 			break;
 	}

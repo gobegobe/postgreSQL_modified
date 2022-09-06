@@ -28,18 +28,24 @@
 #include "optimizer/tlist.h"
 #include "optimizer/lfindex.h"
 
+
+/* Init_inferinfo 初始化 InferInfo, 其中是所有写死的内容
+ */
+
 void Init_inferinfo(InferInfo* ifi, Query* parse)
 {
     RangeTblEntry *rte;
     ListCell *lc;
     int i = 0;
 
-    /*  当前各表对应的 Oid
+    /*  当前各表对应的 Oid, 
+        暂时需要根据机器手动修改, 并且嵌入到代码中
 		16493, // title::production_year
 		30055, // votes
 		30061, // budget
-		30069	// gross
+		30069  // gross
 	*/
+
     ifi->feature_num = 4;
     i = 0;
 	foreach(lc, parse->rtable)
@@ -48,29 +54,69 @@ void Init_inferinfo(InferInfo* ifi, Query* parse)
 		i += 1;
 		switch(rte->relid)
 		{
-			case 16493:
-				ifi->splitable_relids[0] = i;
+			case 16493: // title::production_year
+				ifi->feature_rel_ids[1] = i;
 				break;
-			case 30055:
-				ifi->splitable_relids[1] = i;
+			case 30055: // votes
+				ifi->feature_rel_ids[2] = i;
 				break;
-			case 30061:
-				ifi->splitable_relids[2] = i;
+			case 30061: // budget
+				ifi->feature_rel_ids[3] = i;
 				break;
-			case 30069:
-				ifi->splitable_relids[3] = i;
+			case 30069: // gross
+				ifi->feature_rel_ids[4] = i;
 				break;
 			default:
 				break;
 		}
 	}
 
-    for (i = 0; i < 4; i++)
+    // model weight
+    ifi->W[0] = 24.685979;      // const value 1
+    ifi->W[1] = -0.0092697;     // title::production_year
+    ifi->W[2] = 6.9222664e-06;  // votes
+    ifi->W[3] = -5.029019e-09;  // budget
+    ifi->W[4] = -3.092156e-10;  // gross
+
+    // column number
+    ifi->feature_col_ids[0] = -1;   // 常数
+    ifi->feature_col_ids[1] = 5;    // production_year 是 title 的第 5 列
+    ifi->feature_col_ids[2] = 3;    // votes 是 mi_votes 的第 3 列
+    ifi->feature_col_ids[3] = 3;    // budget 是 mi_votes 的第 3 列
+    ifi->feature_col_ids[4] = 3;    // gross 是 mi_votes 的第 3 列
+
+    // feature range of MIN values
+    ifi->min_values[0] = 0.0;
+    ifi->min_values[1] = 1880.0;
+    ifi->min_values[2] = 5.0;
+    ifi->min_values[3] = 0.0;
+    ifi->min_values[4] = 30.0;
+
+    // feature range of MAX values
+    ifi->max_values[0] = 0.0;
+    ifi->max_values[1] = 2019.0;
+    ifi->max_values[2] = 967526;
+    ifi->max_values[3] = 300000000.0;
+    ifi->max_values[4] = 4599322004.0;
+}
+
+/*  set_feature_contidion
+    [in] ifi: 需要处理的 InferInfo
+    我们显式地指出, 这里将要使用 feature condition
+ */
+void set_feature_contidion(InferInfo *ifi)
+{
+    int i;
+
+    for (i = 1; i <= ifi->feature_num; i += 1)
     {
-        ifi->min_values[i] = 1.0;
-        ifi->max_values[i] = 1.0;
+        ifi->min_values[i] = ifi->min_conditions[i];
+        ifi->max_values[i] = ifi->max_conditions[i];
     }
 }
+
+
+// *************** 关于影子树的实现
 
 /* build_shadow_plan: Build a ShadowPlan Tree from a Plan Tree.
  * [in] curplan: 所要构建的影子树的根节点指针
@@ -137,12 +183,12 @@ void find_sole_op(Shadow_Plan *cur, FilterInfo *fi)
  * [in] cur_plan: 当前递归栈中国所考虑的影子树节点
  * [in] minrows_node: 当前递归栈中, 从根节点到 cur_plan 上, rows 最小的那个节点
  * [in] min_rows: 当前递归栈中 minrows_node 对应的节点所对应的 rows
- * [in] splitable_relids: 被 Split Node 所考虑的那些 relid, 对于一个 Scan 节点而言, 
-        只有当它所扫描的那个表在 splitable_relids 中的时候, 才会被某个中间的 SplitNode 所考虑
+ * [in] feature_rel_ids: 被 Split Node 所考虑的那些 relid, 对于一个 Scan 节点而言, 
+        只有当它所扫描的那个表在 feature_rel_ids 中的时候, 才会被某个中间的 SplitNode 所考虑
  */
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi) 
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi, int depth1, int depth2) 
 {
 
     // 当前进行了很大程度上的简化：假定计划树上的节点只有
@@ -151,18 +197,28 @@ void find_split_node
     int relid;
     int i;
     bool is_member;
+    Shadow_Plan *next_node;
+    double next_minrows;
 
-	if (nodeTag(cur_plan->plan) == T_NestLoop) {
-		Shadow_Plan *next_node = minrows_node;
-		double next_minrows = min_rows;
+    // 假定: 即使有Agg, 也只会出现一次, 且在根节点上面
+    if (nodeTag(cur_plan->plan) == T_Agg)
+    {
+        next_node = cur_plan->lefttree;
+        find_split_node(next_node, next_node, next_node->plan->plan_rows, ifi, depth1 + 1, depth2 + 1);
+        return;
+    }
+	else if (nodeTag(cur_plan->plan) == T_NestLoop) 
+    {
+		next_node = minrows_node;
+		next_minrows = min_rows;
 		if (cur_plan->plan->plan_rows <= min_rows) {
 			next_minrows = cur_plan->plan->plan_rows;
 			next_node = cur_plan;
 		}
 		if (cur_plan->lefttree != NULL)
-			find_split_node(cur_plan->lefttree, next_node, next_minrows, ifi);
+			find_split_node(cur_plan->lefttree, next_node, next_minrows, ifi, depth2, depth2 + 1);
 		if (cur_plan->righttree != NULL)
-			find_split_node(cur_plan->righttree,  next_node, next_minrows, ifi);
+			find_split_node(cur_plan->righttree,  next_node, next_minrows, ifi, depth2, depth2 + 1);
 		return;
 	}
 
@@ -173,72 +229,20 @@ void find_split_node
     relid = ((Scan*)cur_plan->plan)->scanrelid;
     is_member = false;
 
-    for (i = 0; i < ifi->feature_num; i++) {
-        if (relid == ifi->splitable_relids[i])
+    for (i = 1; i <= ifi->feature_num; i++) {
+        if (relid == ifi->feature_rel_ids[i])
             is_member = true;
     }
 
     if (!is_member) return;
-
+    elog(WARNING, "Scan spotted, relid = %d, depth1 = %d, depth2 = %d\n", relid, depth1, depth2);
     minrows_node->spliters = lappend(minrows_node->spliters, (void *)cur_plan);
 }
 
-// ==============================================
-/*  copy_op
- *  该函数的作用是复制一个 Expr 节点并返回副本的指针
- *  该函数所支持的节点需要独立更新，现在只支持 Var、Const、OpExpr
- */
-
-Expr *copy_op(Expr *cur) {
-
-    // 变量定义
-    Var *res1;
-    Const *res2;
-    OpExpr *res;
-    ListCell lc1, lc2;
-    List *lst;
-    // 变量定义结束
-
-    if (cur->type == T_Var) {
-        
-        res1 = makeNode(Var);
-        memcpy(res1, cur, sizeof(Var));
-        return (Expr*)res1;
-    }   
-    else if (cur->type == T_Const) {
-        
-        res2 = makeNode(Const);
-        memcpy(res2, cur, sizeof(Const));
-        return (Expr*)res2;
-    }
-    else if (cur->type == T_OpExpr) {
-        
-        res = makeNode(OpExpr);
-        memcpy(res, cur, sizeof(OpExpr));
-
-        if (res->args->length == 0) 
-            return (Expr*)res;
-        
-        
-        lc1.ptr_value = copy_op((Expr *)res->args->elements[0].ptr_value);
-        lc2.ptr_value = copy_op((Expr *)res->args->elements[1].ptr_value);
-
-        
-        lst = list_make2_impl(T_List, lc1, lc2);
-        res->args = lst;
-
-        return (Expr*)res;
-    }
-
-    assert(false);
-}
-
-
-
 /* find_value：根据传入的条件寻找某一列的min值
  * Parameter:
- * [in] splitable_relids: 需要考虑的 feature 的 relid
- * [in] min_values: 与splitable_relids 一一对应，保存relid 对应的min value值
+ * [in] feature_rel_ids: 需要考虑的 feature 的 relid
+ * [in] min_values: 与feature_rel_ids 一一对应，保存relid 对应的min value值
  * [in] relid: 目标的最小id
  * [out] return: relid对应的 min value 值
  */
@@ -247,9 +251,9 @@ double find_min_value(InferInfo *ifi, int relid) {
     int cur_relid;
     int i;
 
-    for (i = 0; i < ifi->feature_num; i++)
+    for (i = 1; i <= ifi->feature_num; i++)
     {
-        cur_relid = ifi->splitable_relids[i];
+        cur_relid = ifi->feature_rel_ids[i];
         if (cur_relid == relid)
             return ifi->min_values[i];
         i += 1;
@@ -261,9 +265,9 @@ double find_max_value(InferInfo *ifi, int relid) {
     int cur_relid;
     int i;
 
-    for (i = 0; i < ifi->feature_num; i++)
+    for (i = 1; i <= ifi->feature_num; i++)
     {
-        cur_relid = ifi->splitable_relids[i];
+        cur_relid = ifi->feature_rel_ids[i];
         if (cur_relid == relid)
             return ifi->max_values[i];
         i += 1;
@@ -276,8 +280,8 @@ double find_max_value(InferInfo *ifi, int relid) {
  *  cur: 当前递归节点;
  *  prt: cur 的父亲节点 
  *  delete_relid:  想要去除的那个 relid
- *  splitable_relids: 本次查询相关的 feature 的 relid 的列表
- *  min_values: 本次查询相关的 feature 的最小值，与 splitable_relids 一一对应
+ *  feature_rel_ids: 本次查询相关的 feature 的 relid 的列表
+ *  min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  *  [out] deleted_value: 作为结果返回给父节点，是以cur为根的子树中，那些被排除的feature的最小值的总和
  */
 
@@ -409,8 +413,8 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
 /* distribute_joinqual 函数使用 Shadow_plan 进行重写
  * cur: 当前递归处理中的节点
  * op_passed_tome: 来自父亲节点传下来的 OpExpr
- * splitable_relids: 本次查询相关的 feature 的 relid 的列表
- * min_values: 本次查询相关的 feature 的最小值，与 splitable_relids 一一对应
+ * feature_rel_ids: 本次查询相关的 feature 的 relid 的列表
+ * min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  */
 
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInfo *ifi, OpExpr **subop, int depth) {
@@ -434,15 +438,20 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     
     // 变量定义结束
 
+    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", 
+        depth, cur->plan->type);
+
     whatever = 0;
     lefttree = cur->plan->lefttree;
     // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
     if (cur->spliters != NULL) 
     {
+        elog(WARNING, "depth = %d, entering way [1].\n", depth);
         // 未来修改方向：check list length
         nsl = (NestLoop*) cur->plan;
         if (op_passed_tome != NULL) {
             nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
+            elog(WARNING, "depth = %d, I used op_passed_tome.\n", depth);
         }
 
 
@@ -460,11 +469,12 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             // tptp = copy_op( origintp );
             // ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value = tptp;
 
+            elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
             
-
+            /*
             // copy_and_reserve 直接返回的是一个加法表达式
             individual_scan = (OpExpr *) copy_and_reserve(llast(nsl->join.joinqual), delete_relid);
             // 2 * x2 + x1 + 3 * x3 + 4 < 10
@@ -491,29 +501,46 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             linitial(cur_op->args) = middle_result;
 
             *subop = middle_result;
+            */
         }
         
         else // 已经到达叶子
         {
             // nsl == current NeStedLoop node
+
+            /*
             i = ((Plan *)nsl)->targetlist->length;
             cur_expr = llast(nsl->join.joinqual);
             middle_result = linitial(cur_expr->args);
             tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
             ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
             *subop = middle_result;
+
+            */
         }
 
     }
     else 
     {
+        elog(WARNING, "depth = %d, entering way [2].\n", depth);
         if (lefttree->type == T_NestLoop) 
         {
             distribute_joinqual_shadow(cur->lefttree, op_passed_tome, ifi, subop, depth + 1);
+
+            /*
             i = cur->plan->targetlist->length;
             middle_result = *subop;
             tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
             cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
+            */
+        }
+        else if (cur->plan->righttree->type == T_NestLoop)
+        {
+            distribute_joinqual_shadow(cur->righttree, op_passed_tome, ifi, subop, depth + 1);
+        } 
+        else
+        {
+            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop.\n", depth);
         }
         // else : 是Scan 节点, do nothing
     }
@@ -684,5 +711,59 @@ OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt) {  // 最大值小于�
     args = list_make2(op, cst);
     res->args = args;
     return res;
+}
+*/
+
+
+
+// ==============================================
+/*  copy_op
+ *  该函数的作用是复制一个 Expr 节点并返回副本的指针
+ *  该函数所支持的节点需要独立更新，现在只支持 Var、Const、OpExpr
+ */
+
+/*
+Expr *copy_op(Expr *cur) {
+
+    // 变量定义
+    Var *res1;
+    Const *res2;
+    OpExpr *res;
+    ListCell lc1, lc2;
+    List *lst;
+    // 变量定义结束
+
+    if (cur->type == T_Var) {
+        
+        res1 = makeNode(Var);
+        memcpy(res1, cur, sizeof(Var));
+        return (Expr*)res1;
+    }   
+    else if (cur->type == T_Const) {
+        
+        res2 = makeNode(Const);
+        memcpy(res2, cur, sizeof(Const));
+        return (Expr*)res2;
+    }
+    else if (cur->type == T_OpExpr) {
+        
+        res = makeNode(OpExpr);
+        memcpy(res, cur, sizeof(OpExpr));
+
+        if (res->args->length == 0) 
+            return (Expr*)res;
+        
+        
+        lc1.ptr_value = copy_op((Expr *)res->args->elements[0].ptr_value);
+        lc2.ptr_value = copy_op((Expr *)res->args->elements[1].ptr_value);
+
+        
+        lst = list_make2_impl(T_List, lc1, lc2);
+        res->args = lst;
+
+        return (Expr*)res;
+    }
+
+    assert(false);
 }
 */

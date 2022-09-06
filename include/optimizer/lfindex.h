@@ -26,17 +26,13 @@ typedef struct LabelFeatureIndex {
 
 bool isInferFilter(void *qual);
 
-// LabelFeatureIndex *get_label_condition(Query *parse);
 List *get_label_condition(Query *parse);
 
 double constvalue_to_double(Datum datum);
 
+void add_quals_using_label_range(Query *parse, InferInfo *ifi);
 
-List *add_quals_using_label_range(Query *parse);
-
-List *compute_lf_index(LabelFeatureIndex *label_condition, Query *parse);
-
-
+List *compute_lf_index(LabelFeatureIndex *label_condition, InferInfo *ifi);
 
 // =========================================================
 // **************** Create Node Functions

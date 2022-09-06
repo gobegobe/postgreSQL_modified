@@ -295,8 +295,6 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	Shadow_Plan *shadow;
 	
-	List *lf_index_list;
-	OpExpr *planop;
 	OpExpr *whatever_subop;
 
 	InferInfo *inferinfo;
@@ -419,14 +417,34 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	// TODO: 也许开头可以用一个类来保存整个改动中写死的部分
 	// 在这里把写死的和不写死的分开
 	
-	/*
-	if (parse->jointree->quals != NULL)
-		lf_index_list = add_quals_using_label_range(parse);
+	/*  FIXME
+		(1) 用布尔变量来选择运行哪一部分代码
+		    (test1 == True) ==> 就运行 add_quals_using_label_range
+				(test1 == false） ==> 使用初始化的 feature range
+				(test1 == true） ==> 计算为 feature condition
+			(test2 == True) ==> 运行下面的 part_infer
+				(!test1 && test2) ==> part_infer + feature range.
+				(test1 && test2) ==> part_infer + feature condition.
+		(2) 用 lfindex 把两部分相关的地方连接起来
+			* initialize 函数 ==> 从 query 中找到 label_condition ; 
+				对 lfindex 进行赋值 (label_condition / feature range（写死的）).
+			* when (test1 == True) lfindex 中写 feature_condition
+		 	* part_infer 的输入需要有 lfindex 的信息
 	*/
-	
+
+	bool using_feature_condition = true;
+	bool using_part_infer = true;
+
 	inferinfo = makeNode(InferInfo);
 	Init_inferinfo(inferinfo, parse);
-	
+
+	// if (parse->jointree->quals != NULL)
+	if (using_feature_condition)
+	{
+		add_quals_using_label_range(parse, inferinfo);
+		set_feature_contidion(inferinfo);
+	}
+
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL,
 							false, tuple_fraction);
@@ -437,17 +455,15 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	top_plan = create_plan(root, best_path);
 
 	shadow = build_shadow_plan(top_plan);
-	elog(LOG, "shadow = %p", shadow);
-
 	
-	if (top_plan->type == T_NestLoop) {
-		
+	if (using_part_infer && top_plan->type == T_Agg) {
 		
 		// TODO: 需要解决 JOB 数据中：可能存在多个 Filter / 需要检索到目标 Filter 的问题
 		// 思路1: 把 Filter 放在第一个或者是最后一个（如果 Inference 是来自 UDF 则直接确定）
 		// 思路2: 我们只选了 4 个 feature，可以考虑选择 len(splitable_relids) == 4 的那个 Filter
 		
 		// Step1: 先找到哪些节点需要下推 Filter
+		// 如果有两个 Filter 的话, 这里就需要假设 distribute Filter 的起点在同一个Join 节点上
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
 		fi->filter_ops = NULL;
@@ -456,7 +472,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		// Step2: 从 fi 中寻找到对应的 relids
 		// 考虑到目前所有的 Filter 都使用的是相同的 relid, 不妨就从 fi 的第一个里面找
 
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, inferinfo);
+		find_split_node(shadow, shadow, shadow->plan->plan_rows, inferinfo, 1, 1);
 		
 		// TODO: 现在 min/max 都是1，需要获得 Range
 		// 思路1: 可以暴力的和已经写死的数据进行比较来获得 feature 的范围
@@ -467,10 +483,12 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		
 
 		// Step4: 自顶向下将 Filter 向下分发
+		// 当前, 我们只认为有一个不等式可以分发.
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), NULL, inferinfo, &whatever_subop, 1);
-		elog(LOG, "OK, I Reached checkpoint 1, How I wish can success.");
+		
+		elog(WARNING, "OK, I Reached checkpoint 1.");
 	}
-	elog(LOG, "OK, I Reached checkpoint 2, How I wish can success.");
+	elog(WARNING, "OK, I Reached checkpoint 2.");
 	
 	
 	/*

@@ -8,9 +8,14 @@
 typedef struct InferInfo {
     NodeTag type;
     int feature_num;
-    int splitable_relids[4];  // feature 相关的 relid
-    double min_values[4];        // splitable_relids 中每个表的最小值，一一对应
-    double max_values[4];        // splitable_relids 中每个表的最大值，一一对应
+    double W[5];                // Model 相关的 weight
+    int feature_rel_ids[5];     // feature 相关的 relid
+    int feature_col_ids[5];     // feature 相关的 column number
+    double min_values[5];       // splitable_relids 中每个表的最小值，一一对应
+    double max_values[5];       // splitable_relids 中每个表的最大值，一一对应
+
+    double min_conditions[5];   // 使用 lfindex 计算出的 feature condition (MIN)
+    double max_conditions[5];   // 使用 lfindex 计算出的 feature condition (MAX)
 } InferInfo;
 
 typedef struct FilterInfo {
@@ -20,16 +25,18 @@ typedef struct FilterInfo {
                              // 注意, 这里使用双列表设计的原因是一个 shadow_root 可能对应多个 filter
 } FilterInfo;
 
+
 void Init_inferinfo(InferInfo* ifi, Query* parse);
+
+void set_feature_contidion(InferInfo *ifi);
 
 Shadow_Plan *build_shadow_plan(Plan *curplan);
 
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi);
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi, int depth1, int depth2);
 
-Expr *copy_op(Expr *cur);
 
 double find_min_value(InferInfo *ifi, int relid);
 double find_max_value(InferInfo *ifi, int relid);
