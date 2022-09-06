@@ -421,7 +421,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
 
     // 变量定义(为了遵循源代码风格)
     Plan *lefttree;
-    Scan *righttree;
+    Scan *othertree;
     NestLoop *nsl;
 
     Expr *modified_op;
@@ -449,19 +449,20 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         elog(WARNING, "depth = %d, entering way [1].\n", depth);
         // 未来修改方向：check list length
         nsl = (NestLoop*) cur->plan;
-        if (op_passed_tome != NULL) {
+        if (op_passed_tome != NULL && depth != 1) {
             nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
             elog(WARNING, "depth = %d, I used op_passed_tome.\n", depth);
         }
-
+        else
+            elog(WARNING, "depth = %d, op_passed_tome is NULL!\n", depth);
 
         // TODO: 需要一个更普适性的判断叶子节点的方法 (如果JOB中有非左深树的情况下需要处理)
 
         if (lefttree->type == T_NestLoop)
         {
-            righttree = (Scan*) cur->plan->righttree;
-            delete_relid = righttree->scanrelid;
-
+            othertree = (Scan*) cur->plan->righttree;
+            delete_relid = othertree->scanrelid;
+            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
             // TODO：如果右子树是一个无关表...
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
 
@@ -525,7 +526,11 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         elog(WARNING, "depth = %d, entering way [2].\n", depth);
         if (lefttree->type == T_NestLoop) 
         {
-            distribute_joinqual_shadow(cur->lefttree, op_passed_tome, ifi, subop, depth + 1);
+            othertree = (Scan*) cur->plan->righttree;
+            delete_relid = othertree->scanrelid;
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
+
+            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, subop, depth + 1);
 
             /*
             i = cur->plan->targetlist->length;
@@ -536,7 +541,11 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         }
         else if (cur->plan->righttree->type == T_NestLoop)
         {
-            distribute_joinqual_shadow(cur->righttree, op_passed_tome, ifi, subop, depth + 1);
+            othertree = (Scan*) cur->plan->lefttree;
+            delete_relid = othertree->scanrelid;
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
+
+            distribute_joinqual_shadow(cur->righttree, modified_op, ifi, subop, depth + 1);
         } 
         else
         {

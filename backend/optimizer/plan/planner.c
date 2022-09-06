@@ -432,7 +432,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		 	* part_infer 的输入需要有 lfindex 的信息
 	*/
 
-	bool using_feature_condition = true;
+	bool using_feature_condition = false;
 	bool using_part_infer = true;
 
 	inferinfo = makeNode(InferInfo);
@@ -484,7 +484,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		// Step4: 自顶向下将 Filter 向下分发
 		// 当前, 我们只认为有一个不等式可以分发.
-		distribute_joinqual_shadow(linitial(fi->shadow_roots), NULL, inferinfo, &whatever_subop, 1);
+		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), inferinfo, &whatever_subop, 1);
 		
 		elog(WARNING, "OK, I Reached checkpoint 1.");
 	}
