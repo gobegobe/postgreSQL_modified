@@ -115,6 +115,15 @@ void set_feature_contidion(InferInfo *ifi)
     }
 }
 
+bool Is_feature_relid(InferInfo *ifi, int relid)
+{
+    int i;
+    for (i = 1; i <= ifi->feature_num; i += 1)
+        if (relid == ifi->feature_rel_ids[i])
+            return true;
+    return false;
+}
+
 
 // *************** 关于影子树的实现
 
@@ -421,19 +430,15 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
 
     // 变量定义(为了遵循源代码风格)
     Plan *lefttree;
+    Plan *righttree;
     Scan *othertree;
     NestLoop *nsl;
 
     Expr *modified_op;
-    OpExpr *cur_expr; 
     OpExpr *middle_result;
     OpExpr *sub_result;
-    OpExpr *individual_scan;
-    OpExpr *cur_op;
 
     double whatever;
-    int i;
-    TargetEntry *tnt; 
     int delete_relid;
     
     // 变量定义结束
@@ -442,7 +447,10 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         depth, cur->plan->type);
 
     whatever = 0;
+    sub_result = NULL;
     lefttree = cur->plan->lefttree;
+    righttree = cur->plan->righttree;
+
     // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
     if (cur->spliters != NULL) 
     {
@@ -462,62 +470,37 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         {
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
-            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
-            // TODO：如果右子树是一个无关表...
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
 
-            // origintp = ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value;
-            // tptp = copy_op( origintp );
-            // ((NestLoop*) cur->plan)->join.joinqual->elements[0].ptr_value = tptp;
-
+            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
             elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
-            
-            /*
-            // copy_and_reserve 直接返回的是一个加法表达式
-            individual_scan = (OpExpr *) copy_and_reserve(llast(nsl->join.joinqual), delete_relid);
-            // 2 * x2 + x1 + 3 * x3 + 4 < 10
-            // 当前右子树: scan ==> x1
-            // copy_and_delete ==> 2 * x2 + 3 * x3 + 4 < 9
-            // copy_and_reserve ==> (x1)
-            // 修改后的 part infer filter : ((x1) + (2 * x2 + 3 * x3 + 4)) < 10
-            middle_result = makeNode(OpExpr);
-            
-            middle_result->opno = 1758;         // "+" for NUMERIC
-            middle_result->opfuncid = 1724;
-            middle_result->opresulttype = NUMERICOID;   
-            middle_result->opretset = false;
-            middle_result->opcollid = 0;
-            middle_result->inputcollid = 0;
-            middle_result->location = -1;
-            middle_result->args = list_make2(sub_result, individual_scan);
-
-            i = cur->plan->targetlist->length;
-            tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
-            cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
-            
-            cur_op = llast(nsl->join.joinqual);
-            linitial(cur_op->args) = middle_result;
-
-            *subop = middle_result;
-            */
+            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            *subop = middle_result; 
         }
         
-        else // 已经到达叶子
+        else if (righttree->type == T_NestLoop)
         {
-            // nsl == current NeStedLoop node
+            othertree = (Scan*) cur->plan->lefttree;
+            delete_relid = othertree->scanrelid;
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
+            
+            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
+            elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
-            /*
-            i = ((Plan *)nsl)->targetlist->length;
-            cur_expr = llast(nsl->join.joinqual);
-            middle_result = linitial(cur_expr->args);
-            tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
-            ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
-            *subop = middle_result;
+            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
-            */
+            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            *subop = middle_result; 
+        }
+
+        else // 已经到达叶子
+        { 
+            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way 1].\n", depth);
+            middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
+            *subop = middle_result; 
         }
 
     }
@@ -529,36 +512,106 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
+            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
-            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, subop, depth + 1);
-
-            /*
-            i = cur->plan->targetlist->length;
-            middle_result = *subop;
-            tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
-            cur->plan->targetlist = lappend(cur->plan->targetlist, tnt);
-            */
+            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            *subop = middle_result; 
         }
         else if (cur->plan->righttree->type == T_NestLoop)
         {
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
+            distribute_joinqual_shadow(cur->righttree, modified_op, ifi, &sub_result, depth + 1);
 
-            distribute_joinqual_shadow(cur->righttree, modified_op, ifi, subop, depth + 1);
+            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            *subop = middle_result; 
         } 
-        else
+        else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
         {
-            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop.\n", depth);
+            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way2].\n", depth);
+            middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
+            *subop = middle_result; 
+            // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
         }
-        // else : 是Scan 节点, do nothing
+        // else: cur 是一个 Scan 节点, do nothing
     }
 }
+
+OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delete_relid, 
+    Expr *op_passed_tome, OpExpr *res_from_bottom)
+{
+
+    int i;
+    OpExpr *individual_scan;
+    OpExpr *middle_result;
+    NestLoop *nsl;
+    TargetEntry *tnt;
+
+    if (!Is_feature_relid(ifi, delete_relid))
+    {
+        return res_from_bottom;
+    }
+    // 需要处理对 delete_relid 的扫描了
+
+    // 这里需要分别处理, 是因为只有在第一次的时候, 需要保留常数
+    nsl = (NestLoop*) cur->plan;
+    i = ((Plan *)nsl)->targetlist->length;
+
+    if (!res_from_bottom)
+    {
+        middle_result = (OpExpr *) copy_and_reserve(op_passed_tome, delete_relid, true);
+    }
+    else
+    {
+        individual_scan = (OpExpr *) copy_and_reserve(op_passed_tome, delete_relid, false);
+        middle_result = makeNode(OpExpr);
+        middle_result->opno = 1758;         // "+" for NUMERIC
+        middle_result->opfuncid = 1724;
+        middle_result->opresulttype = NUMERICOID;   
+        middle_result->opretset = false;
+        middle_result->opcollid = 0;
+        middle_result->inputcollid = 0;
+        middle_result->location = -1;
+        middle_result->args = list_make2(res_from_bottom, individual_scan);
+    }
+    tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
+    ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
+    return middle_result;
+}
+
+
+OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, InferInfo *ifi, Expr *op_passed_tome)
+{
+    OpExpr *middle_result;
+    NestLoop *nsl;
+    TargetEntry *tnt;
+    int i;
+    int scanrelid1 = ((Scan *)cur->lefttree)->scanrelid;
+    int scanrelid2 = ((Scan *)cur->righttree)->scanrelid;
+
+    if (!Is_feature_relid(ifi, scanrelid1) && !Is_feature_relid(ifi, scanrelid2))
+    {
+        return NULL;
+    }
+    else 
+    {
+        // nsl == current NeStedLoop node
+        nsl = (NestLoop*) cur->plan;
+        i = ((Plan *)nsl)->targetlist->length;
+        middle_result = linitial(( (OpExpr*)op_passed_tome)->args);
+        tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
+        ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
+        return middle_result;
+    }
+    
+}
+
 
 
 // ===========================
 
-Expr *copy_and_reserve(Expr *cur, int reserve_relid) 
+Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const) 
 {
     // 变量定义
     Expr *lresult;
@@ -603,7 +656,7 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
         case 1755:    // '<=' for NUMERIC
         case 1757:    // '>=' for NUMERIC
             // 现在假设任何 <= 号右侧都是一个常数，且 <= 永远在 OpExpr 的根节点
-            linitial(res->args) = copy_and_reserve(linitial(res->args), reserve_relid);
+            linitial(res->args) = copy_and_reserve(linitial(res->args), reserve_relid, reserve_const);
 
             return linitial(res->args); // 注意，这里返回的是根节点的左子树，即只保留 "lhs <= rhs" 中 lhs 这一部分
             break;
@@ -611,15 +664,17 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
         case 1758:   // '+' for NUMERIC
 
             lresult = copy_and_reserve(
-                linitial(res->args), reserve_relid);     
+                linitial(res->args), reserve_relid, reserve_const);     
             rresult = copy_and_reserve(
-                lsecond(res->args), reserve_relid);
+                lsecond(res->args), reserve_relid, reserve_const);
 
             if (lresult == NULL && rresult == NULL) 
                 return NULL;
-            else if(lresult == NULL || nodeTag(linitial(res->args)) == T_Const) // 特殊判断: 抛弃加法的 Const 节点
+            else if(lresult == NULL || 
+                (!reserve_const && nodeTag(linitial(res->args)) == T_Const)) // 特殊判断: 抛弃加法的 Const 节点
                 return rresult;
-            else if(rresult == NULL || nodeTag(lsecond(res->args)) == T_Const)  // 特殊判断: 抛弃加法的 Const 节点
+            else if(rresult == NULL || 
+                (!reserve_const && nodeTag(lsecond(res->args)) == T_Const))  // 特殊判断: 抛弃加法的 Const 节点
                 return lresult;
             else {
                 linitial(res->args) = lresult;
@@ -633,9 +688,9 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid)
             // 对于 * 运算符, 暂时认为其左右节点中, 至少有一个是常数节点
 
             lresult = copy_and_reserve(
-                linitial(res->args), reserve_relid);     
+                linitial(res->args), reserve_relid, reserve_const);     
             rresult = copy_and_reserve(
-                lsecond(res->args), reserve_relid);
+                lsecond(res->args), reserve_relid, reserve_const);
 
             if (lresult == NULL || rresult == NULL)
                 return NULL;

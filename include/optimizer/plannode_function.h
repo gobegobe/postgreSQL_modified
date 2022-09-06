@@ -18,6 +18,8 @@ typedef struct InferInfo {
     double max_conditions[5];   // 使用 lfindex 计算出的 feature condition (MAX)
 } InferInfo;
 
+bool Is_feature_relid(InferInfo *ifi, int relid);
+
 typedef struct FilterInfo {
     NodeTag type;
     List *shadow_roots;      // 自顶向下推 Filter 的起点(一些Shadow_plan) 的列表
@@ -47,10 +49,16 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
 
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInfo *ifi, OpExpr **subop, int depth);
 
+OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delete_relid, 
+    Expr *op_passed_tome, OpExpr *res_from_bottom);
+
+
+OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, InferInfo *ifi, Expr *op_passed_tome);
+
 // 关于查找 feature 初始值
 OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt);
 
-Expr *copy_and_reserve(Expr *cur, int reserve_relid) ;
+Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const) ;
 
 // 关于建立节点
 
