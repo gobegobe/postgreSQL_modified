@@ -13,7 +13,9 @@ typedef struct InferInfo {
     int feature_col_ids[5];     // feature 相关的 column number
     double min_values[5];       // splitable_relids 中每个表的最小值，一一对应
     double max_values[5];       // splitable_relids 中每个表的最大值，一一对应
-
+    // FIXME 
+    // 1. 保存一下 Label 相关的信息 (line 10~13)
+    // 2. 修改一下结构体的名字
     double min_conditions[5];   // 使用 lfindex 计算出的 feature condition (MIN)
     double max_conditions[5];   // 使用 lfindex 计算出的 feature condition (MAX)
 } InferInfo;

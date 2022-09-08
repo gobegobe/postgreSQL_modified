@@ -443,8 +443,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     
     // 变量定义结束
 
-    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", 
-        depth, cur->plan->type);
+    //elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
 
     whatever = 0;
     sub_result = NULL;
@@ -454,15 +453,15 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
     if (cur->spliters != NULL) 
     {
-        elog(WARNING, "depth = %d, entering way [1].\n", depth);
+        // elog(WARNING, "depth = %d, entering way [1].\n", depth);
         // 未来修改方向：check list length
         nsl = (NestLoop*) cur->plan;
         if (op_passed_tome != NULL && depth != 1) {
             nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
-            elog(WARNING, "depth = %d, I used op_passed_tome.\n", depth);
+            // elog(WARNING, "depth = %d, I used op_passed_tome.\n", depth);
         }
-        else
-            elog(WARNING, "depth = %d, op_passed_tome is NULL!\n", depth);
+        
+            //elog(WARNING, "depth = %d, op_passed_tome is NULL!\n", depth);
 
         // TODO: 需要一个更普适性的判断叶子节点的方法 (如果JOB中有非左深树的情况下需要处理)
 
@@ -472,11 +471,12 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
 
-            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
-            elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
+            // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
+            // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
+            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
             middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
@@ -487,18 +487,20 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
             
-            elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
-            elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
+            // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
+            // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
+            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
             middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
 
         else // 已经到达叶子
         { 
-            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way 1].\n", depth);
+            // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way 1].\n", depth);
+            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
             middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
             *subop = middle_result; 
         }
@@ -506,7 +508,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     }
     else 
     {
-        elog(WARNING, "depth = %d, entering way [2].\n", depth);
+        // elog(WARNING, "depth = %d, entering way [2].\n", depth);
         if (lefttree->type == T_NestLoop) 
         {
             othertree = (Scan*) cur->plan->righttree;
@@ -514,6 +516,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
             distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
 
+            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[4].", depth);
             middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
@@ -524,12 +527,15 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
             distribute_joinqual_shadow(cur->righttree, modified_op, ifi, &sub_result, depth + 1);
 
+            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[5].", depth);
             middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         } 
         else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
         {
-            elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way2].\n", depth);
+            // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way2].\n", depth);
+
+            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[6].", depth);
             middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
             *subop = middle_result; 
             // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
@@ -545,25 +551,29 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delet
     int i;
     OpExpr *individual_scan;
     OpExpr *middle_result;
+    List *filter_args;
     NestLoop *nsl;
     TargetEntry *tnt;
 
-    if (!Is_feature_relid(ifi, delete_relid))
-    {
-        return res_from_bottom;
-    }
+    
     // 需要处理对 delete_relid 的扫描了
 
     // 这里需要分别处理, 是因为只有在第一次的时候, 需要保留常数
     nsl = (NestLoop*) cur->plan;
     i = ((Plan *)nsl)->targetlist->length;
-
-    if (!res_from_bottom)
+    if (!Is_feature_relid(ifi, delete_relid))
     {
+        elog(WARNING, "In nonleaf, entering way0.");
+        middle_result = res_from_bottom;
+    }
+    else if (!res_from_bottom)
+    {
+        elog(WARNING, "In nonleaf, entering way1.");
         middle_result = (OpExpr *) copy_and_reserve(op_passed_tome, delete_relid, true);
     }
     else
     {
+        elog(WARNING, "In nonleaf, entering way2.");
         individual_scan = (OpExpr *) copy_and_reserve(op_passed_tome, delete_relid, false);
         middle_result = makeNode(OpExpr);
         middle_result->opno = 1758;         // "+" for NUMERIC
@@ -574,6 +584,12 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delet
         middle_result->inputcollid = 0;
         middle_result->location = -1;
         middle_result->args = list_make2(res_from_bottom, individual_scan);
+
+        if (nsl->join.joinqual != NULL && isInferFilter(llast(nsl->join.joinqual)))
+        {
+            filter_args = ((OpExpr *)llast(nsl->join.joinqual))->args;
+            linitial(filter_args) = middle_result;
+        }
     }
     tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
     ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);

@@ -437,10 +437,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	inferinfo = makeNode(InferInfo);
 	Init_inferinfo(inferinfo, parse);
+	// TODO: 将 Label 的信息保存到 LabelFeatureIndex 中
 
-	// if (parse->jointree->quals != NULL)
 	if (using_feature_condition)
 	{
+		// 1. compute feature condition
+		// 2. set feature condition
+		// 3. add quals
 		add_quals_using_label_range(parse, inferinfo);
 		set_feature_contidion(inferinfo);
 	}
@@ -469,19 +472,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
 
-		// Step2: 从 fi 中寻找到对应的 relids
-		// 考虑到目前所有的 Filter 都使用的是相同的 relid, 不妨就从 fi 的第一个里面找
-
+		// TODO: 可以不传整个 InferInfo
 		find_split_node(shadow, shadow, shadow->plan->plan_rows, inferinfo, 1, 1);
 		
-		// TODO: 现在 min/max 都是1，需要获得 Range
-		// 思路1: 可以暴力的和已经写死的数据进行比较来获得 feature 的范围
-
-		// Step3: 将 Split 相关的relid添加到信息中; 
-		// 		  将 min_values/max_values 添加到信息中
-		// 这一段在上面的 init_inferinfo 中处理
-		
-
 		// Step4: 自顶向下将 Filter 向下分发
 		// 当前, 我们只认为有一个不等式可以分发.
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), inferinfo, &whatever_subop, 1);
