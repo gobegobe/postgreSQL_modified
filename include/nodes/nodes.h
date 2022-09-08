@@ -530,9 +530,9 @@ typedef enum NodeTag
 	T_SupportRequestIndexCondition,	/* in nodes/supportnodes.h */
 
 	T_Shadow_Plan,
-	T_InferInfo,
+	T_LFIndex,
 	T_FilterInfo,
-	T_LabelFeatureIndex,
+	T_RangeInfo,
 } NodeTag;
 
 /*

@@ -5,7 +5,7 @@
 #include "nodes/nodes.h"
 
 
-typedef struct InferInfo {
+typedef struct LFIndex {
     NodeTag type;
     int feature_num;
     double W[5];                // Model 相关的 weight
@@ -13,14 +13,19 @@ typedef struct InferInfo {
     int feature_col_ids[5];     // feature 相关的 column number
     double min_values[5];       // splitable_relids 中每个表的最小值，一一对应
     double max_values[5];       // splitable_relids 中每个表的最大值，一一对应
-    // FIXME 
-    // 1. 保存一下 Label 相关的信息 (line 10~13)
-    // 2. 修改一下结构体的名字
+
     double min_conditions[5];   // 使用 lfindex 计算出的 feature condition (MIN)
     double max_conditions[5];   // 使用 lfindex 计算出的 feature condition (MAX)
-} InferInfo;
 
-bool Is_feature_relid(InferInfo *ifi, int relid);
+    // 保存 Label 相关信息, 未来或许会使用
+    bool has_upper_thd; // default value is false;
+    bool has_lower_thd; // default value is false;
+    double label_upper_value;
+    double label_lower_value;
+
+} LFIndex;
+
+bool Is_feature_relid(LFIndex *lfi, int relid);
 
 typedef struct FilterInfo {
     NodeTag type;
@@ -30,32 +35,32 @@ typedef struct FilterInfo {
 } FilterInfo;
 
 
-void Init_inferinfo(InferInfo* ifi, Query* parse);
+void Init_LFIndex(LFIndex* lfi, Query* parse);
 
-void set_feature_contidion(InferInfo *ifi);
+void set_feature_contidion(LFIndex *lfi);
 
 Shadow_Plan *build_shadow_plan(Plan *curplan);
 
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi, int depth1, int depth2);
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2);
 
 
-double find_min_value(InferInfo *ifi, int relid);
-double find_max_value(InferInfo *ifi, int relid);
+double find_min_value(LFIndex *lfi, int relid);
+double find_max_value(LFIndex *lfi, int relid);
 
 Const *copy_const_withdelta(Const *cur, double delta);
 
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *deleted_value);
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value);
 
-void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInfo *ifi, OpExpr **subop, int depth);
+void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
 
-OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delete_relid, 
+OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom);
 
 
-OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, InferInfo *ifi, Expr *op_passed_tome);
+OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed_tome);
 
 // 关于查找 feature 初始值
 OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt);

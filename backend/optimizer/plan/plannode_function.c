@@ -28,11 +28,12 @@
 #include "optimizer/tlist.h"
 #include "optimizer/lfindex.h"
 
+#include "utils/float.h"
 
-/* Init_inferinfo 初始化 InferInfo, 其中是所有写死的内容
+/* Init_LFIndex 初始化 LFIndex, 其中是所有写死的内容
  */
 
-void Init_inferinfo(InferInfo* ifi, Query* parse)
+void Init_LFIndex(LFIndex* lfi, Query* parse)
 {
     RangeTblEntry *rte;
     ListCell *lc;
@@ -46,7 +47,7 @@ void Init_inferinfo(InferInfo* ifi, Query* parse)
 		30069  // gross
 	*/
 
-    ifi->feature_num = 4;
+    lfi->feature_num = 4;
     i = 0;
 	foreach(lc, parse->rtable)
 	{
@@ -55,16 +56,16 @@ void Init_inferinfo(InferInfo* ifi, Query* parse)
 		switch(rte->relid)
 		{
 			case 16493: // title::production_year
-				ifi->feature_rel_ids[1] = i;
+				lfi->feature_rel_ids[1] = i;
 				break;
 			case 30055: // votes
-				ifi->feature_rel_ids[2] = i;
+				lfi->feature_rel_ids[2] = i;
 				break;
 			case 30061: // budget
-				ifi->feature_rel_ids[3] = i;
+				lfi->feature_rel_ids[3] = i;
 				break;
 			case 30069: // gross
-				ifi->feature_rel_ids[4] = i;
+				lfi->feature_rel_ids[4] = i;
 				break;
 			default:
 				break;
@@ -72,54 +73,60 @@ void Init_inferinfo(InferInfo* ifi, Query* parse)
 	}
 
     // model weight
-    ifi->W[0] = 24.685979;      // const value 1
-    ifi->W[1] = -0.0092697;     // title::production_year
-    ifi->W[2] = 6.9222664e-06;  // votes
-    ifi->W[3] = -5.029019e-09;  // budget
-    ifi->W[4] = -3.092156e-10;  // gross
+    lfi->W[0] = 24.685979;      // const value 1
+    lfi->W[1] = -0.0092697;     // title::production_year
+    lfi->W[2] = 6.9222664e-06;  // votes
+    lfi->W[3] = -5.029019e-09;  // budget
+    lfi->W[4] = -3.092156e-10;  // gross
 
     // column number
-    ifi->feature_col_ids[0] = -1;   // 常数
-    ifi->feature_col_ids[1] = 5;    // production_year 是 title 的第 5 列
-    ifi->feature_col_ids[2] = 3;    // votes 是 mi_votes 的第 3 列
-    ifi->feature_col_ids[3] = 3;    // budget 是 mi_votes 的第 3 列
-    ifi->feature_col_ids[4] = 3;    // gross 是 mi_votes 的第 3 列
+    lfi->feature_col_ids[0] = -1;   // 常数
+    lfi->feature_col_ids[1] = 5;    // production_year 是 title 的第 5 列
+    lfi->feature_col_ids[2] = 3;    // votes 是 mi_votes 的第 3 列
+    lfi->feature_col_ids[3] = 3;    // budget 是 mi_votes 的第 3 列
+    lfi->feature_col_ids[4] = 3;    // gross 是 mi_votes 的第 3 列
 
     // feature range of MIN values
-    ifi->min_values[0] = 0.0;
-    ifi->min_values[1] = 1880.0;
-    ifi->min_values[2] = 5.0;
-    ifi->min_values[3] = 0.0;
-    ifi->min_values[4] = 30.0;
+    lfi->min_values[0] = 0.0;
+    lfi->min_values[1] = 1880.0;
+    lfi->min_values[2] = 5.0;
+    lfi->min_values[3] = 0.0;
+    lfi->min_values[4] = 30.0;
 
     // feature range of MAX values
-    ifi->max_values[0] = 0.0;
-    ifi->max_values[1] = 2019.0;
-    ifi->max_values[2] = 967526;
-    ifi->max_values[3] = 300000000.0;
-    ifi->max_values[4] = 4599322004.0;
+    lfi->max_values[0] = 0.0;
+    lfi->max_values[1] = 2019.0;
+    lfi->max_values[2] = 967526;
+    lfi->max_values[3] = 300000000.0;
+    lfi->max_values[4] = 4599322004.0;
+
+    // label-relative info
+    lfi->has_upper_thd = false;
+    lfi->has_lower_thd = false;
+    lfi->label_upper_value = get_float8_infinity();
+    lfi->label_upper_value = -get_float8_infinity();
 }
 
 /*  set_feature_contidion
-    [in] ifi: 需要处理的 InferInfo
+    [in] lfi: 需要处理的 LFIndex
     我们显式地指出, 这里将要使用 feature condition
  */
-void set_feature_contidion(InferInfo *ifi)
+void set_feature_contidion(LFIndex *lfi)
 {
     int i;
 
-    for (i = 1; i <= ifi->feature_num; i += 1)
+    for (i = 1; i <= lfi->feature_num; i += 1)
     {
-        ifi->min_values[i] = ifi->min_conditions[i];
-        ifi->max_values[i] = ifi->max_conditions[i];
+        lfi->min_values[i] = lfi->min_conditions[i];
+        lfi->max_values[i] = lfi->max_conditions[i];
     }
 }
 
-bool Is_feature_relid(InferInfo *ifi, int relid)
+bool Is_feature_relid(LFIndex *lfi, int relid)
 {
     int i;
-    for (i = 1; i <= ifi->feature_num; i += 1)
-        if (relid == ifi->feature_rel_ids[i])
+    for (i = 1; i <= lfi->feature_num; i += 1)
+        if (relid == lfi->feature_rel_ids[i])
             return true;
     return false;
 }
@@ -197,7 +204,7 @@ void find_sole_op(Shadow_Plan *cur, FilterInfo *fi)
  */
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, InferInfo *ifi, int depth1, int depth2) 
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2) 
 {
 
     // 当前进行了很大程度上的简化：假定计划树上的节点只有
@@ -213,7 +220,7 @@ void find_split_node
     if (nodeTag(cur_plan->plan) == T_Agg)
     {
         next_node = cur_plan->lefttree;
-        find_split_node(next_node, next_node, next_node->plan->plan_rows, ifi, depth1 + 1, depth2 + 1);
+        find_split_node(next_node, next_node, next_node->plan->plan_rows, lfi, depth1 + 1, depth2 + 1);
         return;
     }
 	else if (nodeTag(cur_plan->plan) == T_NestLoop) 
@@ -225,9 +232,9 @@ void find_split_node
 			next_node = cur_plan;
 		}
 		if (cur_plan->lefttree != NULL)
-			find_split_node(cur_plan->lefttree, next_node, next_minrows, ifi, depth2, depth2 + 1);
+			find_split_node(cur_plan->lefttree, next_node, next_minrows, lfi, depth2, depth2 + 1);
 		if (cur_plan->righttree != NULL)
-			find_split_node(cur_plan->righttree,  next_node, next_minrows, ifi, depth2, depth2 + 1);
+			find_split_node(cur_plan->righttree,  next_node, next_minrows, lfi, depth2, depth2 + 1);
 		return;
 	}
 
@@ -238,8 +245,8 @@ void find_split_node
     relid = ((Scan*)cur_plan->plan)->scanrelid;
     is_member = false;
 
-    for (i = 1; i <= ifi->feature_num; i++) {
-        if (relid == ifi->feature_rel_ids[i])
+    for (i = 1; i <= lfi->feature_num; i++) {
+        if (relid == lfi->feature_rel_ids[i])
             is_member = true;
     }
 
@@ -256,29 +263,29 @@ void find_split_node
  * [out] return: relid对应的 min value 值
  */
 
-double find_min_value(InferInfo *ifi, int relid) {
+double find_min_value(LFIndex *lfi, int relid) {
     int cur_relid;
     int i;
 
-    for (i = 1; i <= ifi->feature_num; i++)
+    for (i = 1; i <= lfi->feature_num; i++)
     {
-        cur_relid = ifi->feature_rel_ids[i];
+        cur_relid = lfi->feature_rel_ids[i];
         if (cur_relid == relid)
-            return ifi->min_values[i];
+            return lfi->min_values[i];
         i += 1;
     }
     return 10.00; // just for debug, should not reach here.
 }
 
-double find_max_value(InferInfo *ifi, int relid) {
+double find_max_value(LFIndex *lfi, int relid) {
     int cur_relid;
     int i;
 
-    for (i = 1; i <= ifi->feature_num; i++)
+    for (i = 1; i <= lfi->feature_num; i++)
     {
-        cur_relid = ifi->feature_rel_ids[i];
+        cur_relid = lfi->feature_rel_ids[i];
         if (cur_relid == relid)
-            return ifi->max_values[i];
+            return lfi->max_values[i];
         i += 1;
     }
     return 10.00; // just for debug, should not reach here.
@@ -295,7 +302,7 @@ double find_max_value(InferInfo *ifi, int relid) {
  */
 
 
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *deleted_value) 
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value) 
 {
     // 变量定义
     double del_value_fromnow;
@@ -318,7 +325,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
     {
         if ( ((Var*)cur)->varno == delete_relid) // 当前的 Var 需要被去除
         {
-            (*deleted_value) += find_min_value(ifi, delete_relid);
+            (*deleted_value) += find_min_value(lfi, delete_relid);
             return NULL;
         }
         else
@@ -329,7 +336,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
         vr = (Var *) linitial(((FuncExpr *)cur)->args);
         if (vr->varno == delete_relid)
         {
-            (*deleted_value) += find_min_value(ifi, delete_relid);
+            (*deleted_value) += find_min_value(lfi, delete_relid);
             return NULL;
         }
         else   
@@ -354,7 +361,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
         case 1755:    // '<=' for NUMERIC
         case 1757:    // '>=' for NUMERIC
             // 现在假设任何 < 号右侧都是一个常数，且 < 永远在 OpExpr 的根节点
-            linitial(res->args) = copy_and_delete_op(linitial(res->args), delete_relid, ifi, &del_value_fromnow);
+            linitial(res->args) = copy_and_delete_op(linitial(res->args), delete_relid, lfi, &del_value_fromnow);
             lsecond(res->args) = copy_const_withdelta((Const*)lsecond(res->args), -del_value_fromnow);
             return (Expr *)res;
             break;
@@ -362,9 +369,9 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
         case 1758:   // '+' for NUMERIC
 
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, ifi, &del_value_fromnow);     
+                linitial(res->args), delete_relid, lfi, &del_value_fromnow);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, ifi, &del_value_fromnow);
+                lsecond(res->args), delete_relid, lfi, &del_value_fromnow);
 
             (*deleted_value) += del_value_fromnow;
 
@@ -386,9 +393,9 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
             // 对于 * 运算符, 暂时认为其左右节点中, 至少有一个是常数节点
 
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, ifi, &del_value_fromnow);     
+                linitial(res->args), delete_relid, lfi, &del_value_fromnow);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, ifi, &del_value_fromnow);
+                lsecond(res->args), delete_relid, lfi, &del_value_fromnow);
             
             if (left->type == T_Const) 
             {
@@ -426,7 +433,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, InferInfo *ifi, double *de
  * min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  */
 
-void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInfo *ifi, OpExpr **subop, int depth) {
+void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
 
     // 变量定义(为了遵循源代码风格)
     Plan *lefttree;
@@ -469,15 +476,15 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         {
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
 
             // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
             // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
-            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
+            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
         
@@ -485,15 +492,15 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         {
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, ifi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
             
             // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
             // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
-            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
+            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
 
@@ -501,7 +508,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         { 
             // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way 1].\n", depth);
             elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
-            middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
+            middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome);
             *subop = middle_result; 
         }
 
@@ -513,22 +520,22 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
         {
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
-            distribute_joinqual_shadow(cur->lefttree, modified_op, ifi, &sub_result, depth + 1);
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
+            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[4].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         }
         else if (cur->plan->righttree->type == T_NestLoop)
         {
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, ifi, &whatever);
-            distribute_joinqual_shadow(cur->righttree, modified_op, ifi, &sub_result, depth + 1);
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
+            distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
 
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[5].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, ifi, delete_relid, op_passed_tome, sub_result);
+            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result);
             *subop = middle_result; 
         } 
         else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
@@ -536,7 +543,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
             // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way2].\n", depth);
 
             elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[6].", depth);
-            middle_result = constrct_targetlist_leaf(cur, ifi, op_passed_tome);
+            middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome);
             *subop = middle_result; 
             // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
         }
@@ -544,7 +551,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, InferInf
     }
 }
 
-OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delete_relid, 
+OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom)
 {
 
@@ -561,7 +568,7 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delet
     // 这里需要分别处理, 是因为只有在第一次的时候, 需要保留常数
     nsl = (NestLoop*) cur->plan;
     i = ((Plan *)nsl)->targetlist->length;
-    if (!Is_feature_relid(ifi, delete_relid))
+    if (!Is_feature_relid(lfi, delete_relid))
     {
         elog(WARNING, "In nonleaf, entering way0.");
         middle_result = res_from_bottom;
@@ -597,7 +604,7 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, InferInfo *ifi, int delet
 }
 
 
-OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, InferInfo *ifi, Expr *op_passed_tome)
+OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed_tome)
 {
     OpExpr *middle_result;
     NestLoop *nsl;
@@ -606,7 +613,7 @@ OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, InferInfo *ifi, Expr *op_pass
     int scanrelid1 = ((Scan *)cur->lefttree)->scanrelid;
     int scanrelid2 = ((Scan *)cur->righttree)->scanrelid;
 
-    if (!Is_feature_relid(ifi, scanrelid1) && !Is_feature_relid(ifi, scanrelid2))
+    if (!Is_feature_relid(lfi, scanrelid1) && !Is_feature_relid(lfi, scanrelid2))
     {
         return NULL;
     }

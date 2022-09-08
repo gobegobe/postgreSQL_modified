@@ -4,7 +4,7 @@
 #include "nodes/primnodes.h"
 #include "nodes/nodes.h"
 
-typedef struct LabelFeatureIndex {
+typedef struct RangeInfo {
     NodeTag type;
 
     bool has_upper_thd; // default value is false;
@@ -22,7 +22,7 @@ typedef struct LabelFeatureIndex {
     bool is_trans; // default value is false;
     double weight_value;
 	
-} LabelFeatureIndex;
+} RangeInfo;
 
 bool isInferFilter(void *qual);
 
@@ -30,9 +30,9 @@ List *get_label_condition(Query *parse);
 
 double constvalue_to_double(Datum datum);
 
-void add_quals_using_label_range(Query *parse, InferInfo *ifi);
+void add_quals_using_label_range(Query *parse, LFIndex *lfi);
 
-List *compute_lf_index(LabelFeatureIndex *label_condition, InferInfo *ifi);
+List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi);
 
 // =========================================================
 // **************** Create Node Functions

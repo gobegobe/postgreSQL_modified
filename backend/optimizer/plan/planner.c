@@ -297,7 +297,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	
 	OpExpr *whatever_subop;
 
-	InferInfo *inferinfo;
+	LFIndex *lfi;
 	FilterInfo *fi;
 
 	/*
@@ -435,17 +435,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	bool using_feature_condition = false;
 	bool using_part_infer = true;
 
-	inferinfo = makeNode(InferInfo);
-	Init_inferinfo(inferinfo, parse);
-	// TODO: 将 Label 的信息保存到 LabelFeatureIndex 中
+	lfi = makeNode(LFIndex);
+	Init_LFIndex(lfi, parse);
+	// TODO: 将 Label 的信息保存到 Lfindex 中
 
 	if (using_feature_condition)
 	{
-		// 1. compute feature condition
-		// 2. set feature condition
-		// 3. add quals
-		add_quals_using_label_range(parse, inferinfo);
-		set_feature_contidion(inferinfo);
+		add_quals_using_label_range(parse, lfi);
 	}
 
 	/* primary planning entry point (may recurse for subqueries) */
@@ -472,12 +468,12 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
 
-		// TODO: 可以不传整个 InferInfo
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, inferinfo, 1, 1);
+		// TODO: 可以不传整个 LFIndex
+		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1);
 		
 		// Step4: 自顶向下将 Filter 向下分发
 		// 当前, 我们只认为有一个不等式可以分发.
-		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), inferinfo, &whatever_subop, 1);
+		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 		
 		elog(WARNING, "OK, I Reached checkpoint 1.");
 	}

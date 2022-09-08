@@ -69,11 +69,11 @@ double constvalue_to_double(Datum datum) {
 }
 
 // 从Query中获得label condition
-// 返回一个 <LabelFeatureIndex 的 List> 类型
+// 返回一个 <RangeInfo 的 List> 类型
 List *get_label_condition(Query *parse)
 {
 
-  	LabelFeatureIndex *label_condition;
+  	RangeInfo *label_condition;
 	ListCell *lc;
 	OpExpr *op;
 	List *quals;
@@ -86,9 +86,6 @@ List *get_label_condition(Query *parse)
 	// 在 JOB1a 中，可以发现 parse->jointree->quals 真的是一个 List*
   	quals = ((BoolExpr *) parse->jointree->quals)->args;
 
-	// newquals = list_make1(quals);
-	// parse->jointree->quals = (Node *) newquals;
-
   	foreach (lc, quals)
   	{
 		// 适用于JOB测试的判断即可 
@@ -96,7 +93,7 @@ List *get_label_condition(Query *parse)
 
 		if (isInferFilter(lfirst(lc)))
 		{
-			label_condition = makeNode(LabelFeatureIndex);
+			label_condition = makeNode(RangeInfo);
 			// 从q中得知查询中label值是包含上界还是下界，常量值为多少。 
 
 			switch (op->opno)
@@ -127,10 +124,10 @@ List *get_label_condition(Query *parse)
 
 
 void 
-add_quals_using_label_range(Query *parse, InferInfo *ifi) // entry point, in function standard_planner
+add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in function standard_planner
 {
-	LabelFeatureIndex *label_condition;
-	LabelFeatureIndex *lf_index;
+	RangeInfo *label_condition;
+	RangeInfo *lf_index;
 	List *lf_index_list = NULL;
 	List *quals_prototype = NULL;
 	List *argslist;
@@ -148,19 +145,27 @@ add_quals_using_label_range(Query *parse, InferInfo *ifi) // entry point, in fun
 
 	label_feature_index_list = get_label_condition(parse);
 
+
 	argslist = ((BoolExpr *) parse->jointree->quals)->args;
 	foreach(lc, argslist) {
 		quals_prototype = lappend(quals_prototype, lfirst(lc));
 	}
 
+	// 下面这一行虽然是 foreach 但是由于在 JOB 上的实验暂时只添加一个 Filter, 所以只会运行一次
+
 	foreach(lf_lc, label_feature_index_list)
 	{
 		label_condition = lfirst(lf_lc);
-		lf_index_list = compute_lf_index(label_condition, ifi); 
+		lf_index_list = compute_lf_index(label_condition, lfi); 
+
+		lfi->has_upper_thd = label_condition->has_upper_thd;
+		lfi->has_lower_thd = label_condition->has_lower_thd;
+		lfi->label_upper_value = label_condition->label_upper_value;
+		lfi->label_lower_value = label_condition->label_lower_value;
 
 		foreach(lc, lf_index_list)
 		{
-			lf_index = (LabelFeatureIndex *) lfirst(lc);
+			lf_index = (RangeInfo *) lfirst(lc);
 			if (lf_index == NULL) continue;
 
 			counter += 1;
@@ -211,11 +216,14 @@ add_quals_using_label_range(Query *parse, InferInfo *ifi) // entry point, in fun
 		}
 	}
 	parse->jointree->quals = (Node *) makeBoolExpr(AND_EXPR, quals_prototype, -1);
+
+	// 选择使用 feature_condition
+	set_feature_contidion(lfi);
 	elog(LOG, "counter = %d\n", counter);
 }
 
  
-List *compute_lf_index(LabelFeatureIndex *label_condition, InferInfo *ifi)
+List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 {	
 	double sum_min_y, sum_max_y;
 	double feature_min, feature_max; 
@@ -225,27 +233,27 @@ List *compute_lf_index(LabelFeatureIndex *label_condition, InferInfo *ifi)
 
 	bool is_trans_flag[5] = {false, false, false, false, false}; 
 	List *lf_index_list;
-	LabelFeatureIndex *lf_index;
+	RangeInfo *lf_index;
 
 	lf_index_list = list_make1(NULL);
 	// 处理W为负的情况
-	for (i = 1; i <= ifi->feature_num; i++)
-		if (ifi->W[i] < 0.0)
+	for (i = 1; i <= lfi->feature_num; i++)
+		if (lfi->W[i] < 0.0)
 		{
-			tmp = ifi->min_values[i];
-			ifi->min_values[i] = ifi->max_values[i] * (-1.0);
-			ifi->max_values[i] = tmp * (-1.0);
-			ifi->W[i] = ifi->W[i] * (-1.0);
+			tmp = lfi->min_values[i];
+			lfi->min_values[i] = lfi->max_values[i] * (-1.0);
+			lfi->max_values[i] = tmp * (-1.0);
+			lfi->W[i] = lfi->W[i] * (-1.0);
 			is_trans_flag[i] = true;
 		}
 
 	// 处理单边label range情况
-	inf_min_y = ifi->W[0]; // 用户没有给label下界时，下界的值 
-	inf_max_y = ifi->W[0]; // 用户没有给label上界时，上界的值 
-	for (i = 1; i <= ifi->feature_num; i++)
+	inf_min_y = lfi->W[0]; // 用户没有给label下界时，下界的值 
+	inf_max_y = lfi->W[0]; // 用户没有给label上界时，上界的值 
+	for (i = 1; i <= lfi->feature_num; i++)
 	{
-		inf_min_y += ifi->W[i] * ifi->min_values[i];
-		inf_max_y += ifi->W[i] * ifi->max_values[i];
+		inf_min_y += lfi->W[i] * lfi->min_values[i];
+		inf_max_y += lfi->W[i] * lfi->max_values[i];
 	}
 
 	if (!label_condition->has_upper_thd)	 // thd = threshold
@@ -258,46 +266,46 @@ List *compute_lf_index(LabelFeatureIndex *label_condition, InferInfo *ifi)
 	}
 
 	// 开始计算
-	sum_min_y = label_condition->label_lower_value - ifi->W[0]; 
-	sum_max_y = label_condition->label_upper_value - ifi->W[0]; 
-	for (i = 1; i <= ifi->feature_num; i++)
+	sum_min_y = label_condition->label_lower_value - lfi->W[0]; 
+	sum_max_y = label_condition->label_upper_value - lfi->W[0]; 
+	for (i = 1; i <= lfi->feature_num; i++)
 	{
-		sum_min_y -= ifi->W[i] * ifi->max_values[i];
-		sum_max_y -= ifi->W[i] * ifi->min_values[i];
+		sum_min_y -= lfi->W[i] * lfi->max_values[i];
+		sum_max_y -= lfi->W[i] * lfi->min_values[i];
 	}
-	for (i = 1; i <= ifi->feature_num; i++)
+	for (i = 1; i <= lfi->feature_num; i++)
 	{
 		// 计算feature range
-		feature_min = Max((sum_min_y / ifi->W[i] + ifi->max_values[i]), ifi->min_values[i]); 
-		feature_max = Min((sum_max_y / ifi->W[i] + ifi->min_values[i]), ifi->max_values[i]);
+		feature_min = Max((sum_min_y / lfi->W[i] + lfi->max_values[i]), lfi->min_values[i]); 
+		feature_max = Min((sum_max_y / lfi->W[i] + lfi->min_values[i]), lfi->max_values[i]);
 
 		// 记录feature range
-		lf_index = makeNode(LabelFeatureIndex);
+		lf_index = makeNode(RangeInfo);
 		lf_index->has_upper_thd = label_condition->has_upper_thd; 
 		lf_index->has_lower_thd = label_condition->has_lower_thd; 
 		lf_index->label_upper_value = label_condition->label_upper_value; 
 		lf_index->label_lower_value = label_condition->label_lower_value; 
-		lf_index->feature_relid = ifi->feature_rel_ids[i];
-		lf_index->feature_colid = ifi->feature_col_ids[i];
+		lf_index->feature_relid = lfi->feature_rel_ids[i];
+		lf_index->feature_colid = lfi->feature_col_ids[i];
 		if (!is_trans_flag[i])
 		{
 			lf_index->is_trans = false;
 			lf_index->feature_upper_value = feature_max;
 			lf_index->feature_lower_value = feature_min;
-			lf_index->weight_value = ifi->W[i];
+			lf_index->weight_value = lfi->W[i];
 
-			ifi->min_conditions[i] = feature_min;
-			ifi->max_conditions[i] = feature_max;
+			lfi->min_conditions[i] = feature_min;
+			lfi->max_conditions[i] = feature_max;
 		}
 		else	// W 负的情况，把feature取值范围和模型参数还原
 		{
 			lf_index->is_trans = true;
 			lf_index->feature_upper_value = (-1.0) * feature_min;
 			lf_index->feature_lower_value = (-1.0) * feature_max;
-			lf_index->weight_value = (-1.0) * ifi->W[i];
+			lf_index->weight_value = (-1.0) * lfi->W[i];
 
-			ifi->min_conditions[i] = feature_max;
-			ifi->max_conditions[i] = feature_min;
+			lfi->min_conditions[i] = feature_max;
+			lfi->max_conditions[i] = feature_min;
 		}
 
 		lf_index->feature_typeoid = (i == 1) ? INT4OID : NUMERICOID;
