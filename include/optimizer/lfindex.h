@@ -4,6 +4,7 @@
 #include "nodes/primnodes.h"
 #include "nodes/nodes.h"
 
+// LabelFeatureIndex
 typedef struct RangeInfo {
     NodeTag type;
 

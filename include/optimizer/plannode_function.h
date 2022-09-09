@@ -23,6 +23,9 @@ typedef struct LFIndex {
     double label_upper_value;
     double label_lower_value;
 
+    // 中间处理信息
+    int split_node_deepest;
+
 } LFIndex;
 
 bool Is_feature_relid(LFIndex *lfi, int relid);
@@ -57,10 +60,10 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
-    Expr *op_passed_tome, OpExpr *res_from_bottom);
+    Expr *op_passed_tome, OpExpr *res_from_bottom, int depth);
 
 
-OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed_tome);
+OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed_tome, int depth);
 
 // 关于查找 feature 初始值
 OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt);
