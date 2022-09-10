@@ -954,6 +954,26 @@ static const unit_conversion time_unit_conversion_table[] =
 static struct config_bool ConfigureNamesBool[] =
 {
 	{
+		{"using_feature_condition_x", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using feature conditions."),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&using_feature_condition_x,
+		false,
+		NULL, NULL, NULL
+	},
+	{
+		{"using_part_infer_x", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using part_infer."),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&using_part_infer_x,
+		false,
+		NULL, NULL, NULL
+	},
+	{
 		{"enable_seqscan", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Enables the planner's use of sequential-scan plans."),
 			NULL,

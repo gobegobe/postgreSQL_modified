@@ -432,6 +432,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		 	* part_infer 的输入需要有 lfindex 的信息
 	*/
 
+	elog(WARNING, "Configure cnodition = %d %d.", 
+		using_feature_condition_x, using_part_infer_x);
+
 	bool using_feature_condition = false;
 	bool using_part_infer = true;
 

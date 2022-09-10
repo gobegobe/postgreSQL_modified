@@ -151,6 +151,9 @@ bool		enable_parallel_hash = true;
 bool		enable_partition_pruning = true;
 bool		enable_async_append = true;
 
+bool		using_feature_condition_x = false;
+bool		using_part_infer_x = false;
+
 typedef struct
 {
 	PlannerInfo *root;
