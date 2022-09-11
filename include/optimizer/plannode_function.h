@@ -9,7 +9,7 @@ typedef struct LFIndex {
     NodeTag type;
     int feature_num;
     double W[5];                // Model 相关的 weight
-    int feature_rel_ids[5];     // feature 相关的 relid
+    List *feature_rel_ids[5];     // feature 相关的 relid
     int feature_col_ids[5];     // feature 相关的 column number
     double min_values[5];       // splitable_relids 中每个表的最小值，一一对应
     double max_values[5];       // splitable_relids 中每个表的最大值，一一对应

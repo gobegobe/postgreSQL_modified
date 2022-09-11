@@ -432,17 +432,17 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		 	* part_infer 的输入需要有 lfindex 的信息
 	*/
 
-	elog(WARNING, "Configure cnodition = %d %d.", 
+	elog(WARNING, "Configure cnodition = %d %d.\n", 
 		using_feature_condition_x, using_part_infer_x);
 
-	bool using_feature_condition = false;
-	bool using_part_infer = true;
+	// bool using_feature_condition = false;
+	// bool using_part_infer = true;
 
 	lfi = makeNode(LFIndex);
 	Init_LFIndex(lfi, parse);
 	// TODO: 将 Label 的信息保存到 Lfindex 中
 
-	if (using_feature_condition)
+	if (using_feature_condition_x)
 	{
 		add_quals_using_label_range(parse, lfi);
 	}
@@ -458,7 +458,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	shadow = build_shadow_plan(top_plan);
 	
-	if (using_part_infer && top_plan->type == T_Agg) {
+	if (using_part_infer_x && top_plan->type == T_Agg) {
 		
 		// TODO: 需要解决 JOB 数据中：可能存在多个 Filter / 需要检索到目标 Filter 的问题
 		// 思路1: 把 Filter 放在第一个或者是最后一个（如果 Inference 是来自 UDF 则直接确定）
@@ -560,7 +560,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		}
 		SS_finalize_plan(root, top_plan);
 	}
-
+	elog(WARNING, "OK, I Reached checkpoint 3.");
 	/* final cleanup of the plan */
 	Assert(glob->finalrtable == NIL);
 	Assert(glob->finalrowmarks == NIL);
@@ -576,7 +576,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		lfirst(lp) = set_plan_references(subroot, subplan);
 	}
-
+	elog(WARNING, "OK, I Reached checkpoint 4.");
 	/* build the PlannedStmt result */
 	result = makeNode(PlannedStmt);
 
@@ -631,6 +631,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	if (glob->partition_directory != NULL)
 		DestroyPartitionDirectory(glob->partition_directory);
 
+	elog(WARNING, "OK, I Reached checkpoint 5.");
 	return result;
 }
 

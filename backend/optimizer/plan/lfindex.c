@@ -272,6 +272,7 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 	{
 		sum_min_y -= lfi->W[i] * lfi->max_values[i];
 		sum_max_y -= lfi->W[i] * lfi->min_values[i];
+
 	}
 	for (i = 1; i <= lfi->feature_num; i++)
 	{
@@ -279,14 +280,17 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 		feature_min = Max((sum_min_y / lfi->W[i] + lfi->max_values[i]), lfi->min_values[i]); 
 		feature_max = Min((sum_max_y / lfi->W[i] + lfi->min_values[i]), lfi->max_values[i]);
 
+
 		// 记录feature range
 		lf_index = makeNode(RangeInfo);
 		lf_index->has_upper_thd = label_condition->has_upper_thd; 
 		lf_index->has_lower_thd = label_condition->has_lower_thd; 
 		lf_index->label_upper_value = label_condition->label_upper_value; 
 		lf_index->label_lower_value = label_condition->label_lower_value; 
-		lf_index->feature_relid = lfi->feature_rel_ids[i];
+		
+		lf_index->feature_relid = linitial_int(lfi->feature_rel_ids[i]);
 		lf_index->feature_colid = lfi->feature_col_ids[i];
+
 		if (!is_trans_flag[i])
 		{
 			lf_index->is_trans = false;

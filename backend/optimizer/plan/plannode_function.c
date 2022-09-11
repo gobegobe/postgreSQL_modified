@@ -38,6 +38,10 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
     RangeTblEntry *rte;
     ListCell *lc;
     int i = 0;
+    lfi->feature_num = 4;
+
+    for (i = 1; i <= lfi->feature_num; i += 1)
+        lfi->feature_rel_ids[i] = NULL;
 
     /*  当前各表对应的 Oid, 
         暂时需要根据机器手动修改, 并且嵌入到代码中
@@ -47,7 +51,7 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 		30069  // gross
 	*/
 
-    lfi->feature_num = 4;
+    
     i = 0;
 	foreach(lc, parse->rtable)
 	{
@@ -56,21 +60,32 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 		switch(rte->relid)
 		{
 			case 16493: // title::production_year
-				lfi->feature_rel_ids[1] = i;
+
+                /*
+                    BUG FIX: 下面这一行的作用是一个简单的布丁(虽然使用了很多时间排查)
+                    JOB 32B中，会出现两个 title，这带来了很大的问题，总之我们只选择 t1
+                */
+                if (lfi->feature_rel_ids[1] == NULL)
+				    lfi->feature_rel_ids[1] = lappend_int(lfi->feature_rel_ids[1], i);
 				break;
 			case 30055: // votes
-				lfi->feature_rel_ids[2] = i;
+				lfi->feature_rel_ids[2] = lappend_int(lfi->feature_rel_ids[2], i);
 				break;
 			case 30061: // budget
-				lfi->feature_rel_ids[3] = i;
+				lfi->feature_rel_ids[3] = lappend_int(lfi->feature_rel_ids[3], i);
 				break;
 			case 30069: // gross
-				lfi->feature_rel_ids[4] = i;
+				lfi->feature_rel_ids[4] = lappend_int(lfi->feature_rel_ids[4], i);
 				break;
 			default:
 				break;
 		}
 	}
+
+    for (i = 1; i <= lfi->feature_num; i++)
+    {
+        elog(WARNING, "feature_rel_ids length = %d", lfi->feature_rel_ids[i]->length);
+    }
 
     // model weight
     lfi->W[0] = 24.685979;      // const value 1
@@ -128,7 +143,7 @@ bool Is_feature_relid(LFIndex *lfi, int relid)
 {
     int i;
     for (i = 1; i <= lfi->feature_num; i += 1)
-        if (relid == lfi->feature_rel_ids[i])
+        if (list_member_int(lfi->feature_rel_ids[i], relid))
             return true;
     return false;
 }
@@ -248,7 +263,7 @@ void find_split_node
     is_member = false;
 
     for (i = 1; i <= lfi->feature_num; i++) {
-        if (relid == lfi->feature_rel_ids[i])
+        if (list_member_int(lfi->feature_rel_ids[i], relid))
             is_member = true;
     }
 
@@ -266,13 +281,11 @@ void find_split_node
  */
 
 double find_min_value(LFIndex *lfi, int relid) {
-    int cur_relid;
     int i;
 
     for (i = 1; i <= lfi->feature_num; i++)
     {
-        cur_relid = lfi->feature_rel_ids[i];
-        if (cur_relid == relid)
+        if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->min_values[i];
         i += 1;
     }
@@ -280,13 +293,11 @@ double find_min_value(LFIndex *lfi, int relid) {
 }
 
 double find_max_value(LFIndex *lfi, int relid) {
-    int cur_relid;
     int i;
 
     for (i = 1; i <= lfi->feature_num; i++)
     {
-        cur_relid = lfi->feature_rel_ids[i];
-        if (cur_relid == relid)
+        if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->max_values[i];
         i += 1;
     }
@@ -462,17 +473,13 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
     // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
     if (cur->spliters != NULL) 
     {
-        // elog(WARNING, "depth = %d, entering way [1].\n", depth);
-        // 未来修改方向：check list length
+
         nsl = (NestLoop*) cur->plan;
         if (op_passed_tome != NULL && depth != 1) {
             nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
-            // elog(WARNING, "depth = %d, I used op_passed_tome.\n", depth);
         }
         lfi->split_node_deepest = depth;
-            //elog(WARNING, "depth = %d, op_passed_tome is NULL!\n", depth);
 
-        // TODO: 需要一个更普适性的判断叶子节点的方法 (如果JOB中有非左深树的情况下需要处理)
 
         if (lefttree->type == T_NestLoop)
         {
@@ -480,14 +487,13 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
 
-            // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
-            // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
-
             distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
-
+            
+            
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
             middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
             *subop = middle_result; 
+            
         }
         
         else if (righttree->type == T_NestLoop)
@@ -496,22 +502,22 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
             
-            // elog(WARNING, "depth = %d, delete_relid = %d\n", depth, delete_relid);
-            // elog(WARNING, "depth = %d, modified_op = %p\n", depth, modified_op);
 
             distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
+            
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
             middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
             *subop = middle_result; 
+            
         }
 
         else // 已经到达叶子
         { 
-            // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way 1].\n", depth);
-            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
+            
             middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
             *subop = middle_result; 
+            
         }
 
     }
@@ -525,9 +531,11 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
             distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
+            
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[4].", depth);
             middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
             *subop = middle_result; 
+            
         }
         else if (cur->plan->righttree->type == T_NestLoop)
         {
@@ -536,17 +544,19 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
             distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
 
+            
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[5].", depth);
             middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
             *subop = middle_result; 
+            
         } 
         else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
         {
-            // elog(WARNING, "depth = %d, left tree and right tree are not NestLoop[way2].\n", depth);
-
+            
             elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[6].", depth);
             middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
             *subop = middle_result; 
+            
             // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
         }
         // else: cur 是一个 Scan 节点, do nothing
@@ -593,20 +603,21 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
         middle_result->inputcollid = 0;
         middle_result->location = -1;
         middle_result->args = list_make2(res_from_bottom, individual_scan);
-
+        
         if (nsl->join.joinqual != NULL && isInferFilter(llast(nsl->join.joinqual)))
         {
             filter_args = ((OpExpr *)llast(nsl->join.joinqual))->args;
             linitial(filter_args) = middle_result;
         }
+        
     }
 
-    if (depth <= lfi->split_node_deepest)
+    if (middle_result != NULL && depth <= lfi->split_node_deepest)
     {
         tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
         ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
     }
-    
+
     return middle_result;
 }
 
@@ -622,14 +633,17 @@ OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed
 
     if (!Is_feature_relid(lfi, scanrelid1) && !Is_feature_relid(lfi, scanrelid2))
     {
+        elog(WARNING, "In Leaf, returning NULL.");
         return NULL;
     }
     else
     {
+        elog(WARNING, "In Leaf, constucting middle result.");
         // nsl == current NeStedLoop node
         nsl = (NestLoop*) cur->plan;
         i = ((Plan *)nsl)->targetlist->length;
         middle_result = linitial(( (OpExpr*)op_passed_tome)->args);
+
 
         if (depth <= lfi->split_node_deepest)
         {
