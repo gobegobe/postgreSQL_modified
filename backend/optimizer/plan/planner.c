@@ -476,6 +476,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		
 		// Step4: 自顶向下将 Filter 向下分发
 		// 当前, 我们只认为有一个不等式可以分发.
+		elog(WARNING, "OK, I Reached checkpoint 0.");
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 		
 		elog(WARNING, "OK, I Reached checkpoint 1.");

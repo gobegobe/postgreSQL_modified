@@ -463,7 +463,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
     
     // 变量定义结束
 
-    //elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
+    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
 
     whatever = 0;
     sub_result = NULL;
@@ -473,7 +473,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
     // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
     if (cur->spliters != NULL) 
     {
-
+        elog(WARNING, "depth = %d, entering way [1].\n", depth);
         nsl = (NestLoop*) cur->plan;
         if (op_passed_tome != NULL && depth != 1) {
             nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
@@ -483,6 +483,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
 
         if (lefttree->type == T_NestLoop)
         {
+            elog(WARNING, "depth = %d, entering way [1.1].\n", depth);
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
@@ -498,12 +499,13 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         
         else if (righttree->type == T_NestLoop)
         {
+            elog(WARNING, "depth = %d, entering way [1.2].\n", depth);
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
             
 
-            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
+            distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
 
             
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
@@ -514,7 +516,8 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
 
         else // 已经到达叶子
         { 
-            
+            elog(WARNING, "depth = %d, entering way [1.3].\n", depth);
+            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
             middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
             *subop = middle_result; 
             
@@ -523,9 +526,10 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
     }
     else 
     {
-        // elog(WARNING, "depth = %d, entering way [2].\n", depth);
+        elog(WARNING, "depth = %d, entering way [2].\n", depth);
         if (lefttree->type == T_NestLoop) 
         {
+            elog(WARNING, "depth = %d, entering way [2.1].\n", depth);
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
@@ -539,6 +543,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         }
         else if (cur->plan->righttree->type == T_NestLoop)
         {
+            elog(WARNING, "depth = %d, entering way [2.2].\n", depth);
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
             modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
@@ -552,12 +557,16 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         } 
         else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
         {
-            
+            elog(WARNING, "depth = %d, entering way [2.3].\n", depth);
             elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[6].", depth);
             middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
             *subop = middle_result; 
             
             // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
+        }
+        else
+        {
+            elog(WARNING, "depth = %d, entering way [2.4].\n", depth);
         }
         // else: cur 是一个 Scan 节点, do nothing
     }
@@ -604,6 +613,15 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
         middle_result->location = -1;
         middle_result->args = list_make2(res_from_bottom, individual_scan);
         
+        if (res_from_bottom == NULL)
+        {
+            elog(WARNING, "Shit, res_from_bottom == NULL.");
+        }
+        else if(individual_scan == NULL)
+        {
+        elog(WARNING, "Shit, individual_scan == NULL.");    
+        }
+
         if (nsl->join.joinqual != NULL && isInferFilter(llast(nsl->join.joinqual)))
         {
             filter_args = ((OpExpr *)llast(nsl->join.joinqual))->args;
