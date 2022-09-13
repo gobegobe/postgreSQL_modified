@@ -37,6 +37,17 @@
 #include "c.h"
 // ==========================================
 
+bool double_same(double v1, double v2)
+{
+	double abs0 = (v1 > v2) ? (v1 - v2) : (v2 - v1);
+	double abs1 = (v1 > 0) ? v1 : -v1;
+	double abs2 = (v2 > 0) ? v2 : -v2;
+	if (v1 == 0) return v2 != 0;
+	if (v2 == 0) return v1 != 0;
+	
+	return (100.0 * abs0 < abs1) && (100.0 * abs0 < abs2);
+}
+
 // 判断当前filter是否为infer对应filter，返回 true or false。 
 bool isInferFilter(void *qual) {
 
@@ -173,6 +184,13 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 			{
 				if(!lf_index->is_trans) // W 为正，feature有上界
 				{ 
+					if (double_same(lf_index->feature_upper_value, lf_index->feature_range_max)) 
+						continue;
+					else 
+					{
+						elog(WARNING, "Not Same(1): [%lf], [%lf]", lf_index->feature_upper_value, lf_index->feature_range_max);
+					}
+
 					up_op = create_additional_upper_qual(lf_index->feature_relid, lf_index->feature_colid,
 						lf_index->feature_upper_value, lf_index->feature_typeoid);
 
@@ -180,6 +198,13 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 				}
 				else // W 为负，feature有下界 
 				{ 
+
+					if (double_same(lf_index->feature_lower_value, lf_index->feature_range_min)) 
+						continue;
+					else 
+					{
+						elog(WARNING, "Not Same(2): [%lf], [%lf]", lf_index->feature_lower_value, lf_index->feature_range_min);
+					}
 					up_op = create_additional_lower_qual(lf_index->feature_relid, lf_index->feature_colid,
 					lf_index->feature_lower_value, lf_index->feature_typeoid);
 
@@ -194,6 +219,12 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 			{ 
 				if(!lf_index->is_trans) // W 为正，feature有下界
 				{ 	
+					if (double_same(lf_index->feature_lower_value, lf_index->feature_range_min)) 
+						continue;
+					else 
+					{
+						elog(WARNING, "Not Same(3): [%lf], [%lf]", lf_index->feature_lower_value, lf_index->feature_range_min);
+					}
 					low_op = create_additional_lower_qual(lf_index->feature_relid, lf_index->feature_colid, 
 						lf_index->feature_lower_value, lf_index->feature_typeoid);
 
@@ -203,6 +234,12 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 				}
 				else	// W 为负，feature有上界 
 				{ 	
+					if (double_same(lf_index->feature_upper_value, lf_index->feature_range_max)) 
+						continue;
+					else 
+					{
+						elog(WARNING, "Not Same(4): [%lf], [%lf]", lf_index->feature_upper_value, lf_index->feature_range_max);
+					}
 					low_op = create_additional_upper_qual(lf_index->feature_relid, lf_index->feature_colid,
 						lf_index->feature_upper_value, lf_index->feature_typeoid);	
 					
@@ -288,6 +325,9 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 		lf_index->label_upper_value = label_condition->label_upper_value; 
 		lf_index->label_lower_value = label_condition->label_lower_value; 
 		
+		// 将 feature 原本的范围带到 RangeInfo 中
+		
+
 		lf_index->feature_relid = linitial_int(lfi->feature_rel_ids[i]);
 		lf_index->feature_colid = lfi->feature_col_ids[i];
 
@@ -300,6 +340,9 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 
 			lfi->min_conditions[i] = feature_min;
 			lfi->max_conditions[i] = feature_max;
+
+			lf_index->feature_range_max = lfi->max_values[i];
+			lf_index->feature_range_min = lfi->min_values[i];
 		}
 		else	// W 负的情况，把feature取值范围和模型参数还原
 		{
@@ -308,8 +351,11 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 			lf_index->feature_lower_value = (-1.0) * feature_max;
 			lf_index->weight_value = (-1.0) * lfi->W[i];
 
-			lfi->min_conditions[i] = feature_max;
-			lfi->max_conditions[i] = feature_min;
+			lfi->min_conditions[i] = (-1.0) * feature_max;
+			lfi->max_conditions[i] = (-1.0) * feature_min;
+
+			lf_index->feature_range_max = (-1.0) * lfi->min_values[i];
+			lf_index->feature_range_min = (-1.0) * lfi->max_values[i];
 		}
 
 		lf_index->feature_typeoid = (i == 1) ? INT4OID : NUMERICOID;

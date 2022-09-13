@@ -37,6 +37,7 @@ typedef struct FilterInfo {
                              // 注意, 这里使用双列表设计的原因是一个 shadow_root 可能对应多个 filter
 } FilterInfo;
 
+bool double_same(double v1, double v2);
 
 void Init_LFIndex(LFIndex* lfi, Query* parse);
 

@@ -18,6 +18,9 @@ typedef struct RangeInfo {
     double feature_upper_value;
     double feature_lower_value;
     
+    double feature_range_max;
+    double feature_range_min;
+
     int feature_typeoid;
 
     bool is_trans; // default value is false;
