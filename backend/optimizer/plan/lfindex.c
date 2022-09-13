@@ -176,14 +176,14 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 					up_op = create_additional_upper_qual(lf_index->feature_relid, lf_index->feature_colid,
 						lf_index->feature_upper_value, lf_index->feature_typeoid);
 
-					elog(LOG, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", counter, lf_index->feature_relid, lf_index->feature_colid, lf_index->feature_upper_value,lf_index->feature_typeoid);
+					elog(WARNING, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", counter, lf_index->feature_relid, lf_index->feature_colid, lf_index->feature_upper_value,lf_index->feature_typeoid);
 				}
 				else // W 为负，feature有下界 
 				{ 
 					up_op = create_additional_lower_qual(lf_index->feature_relid, lf_index->feature_colid,
 					lf_index->feature_lower_value, lf_index->feature_typeoid);
 
-					elog(LOG, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
+					elog(WARNING, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
 						counter, lf_index->feature_relid, lf_index->feature_colid, lf_index->feature_upper_value,
 						lf_index->feature_typeoid);
 				}
@@ -197,7 +197,7 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 					low_op = create_additional_lower_qual(lf_index->feature_relid, lf_index->feature_colid, 
 						lf_index->feature_lower_value, lf_index->feature_typeoid);
 
-					elog(LOG, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
+					elog(WARNING, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
 						counter, lf_index->feature_relid, lf_index->feature_colid, lf_index->feature_upper_value,
 						lf_index->feature_typeoid);
 				}
@@ -206,7 +206,7 @@ add_quals_using_label_range(Query *parse, LFIndex *lfi) // entry point, in funct
 					low_op = create_additional_upper_qual(lf_index->feature_relid, lf_index->feature_colid,
 						lf_index->feature_upper_value, lf_index->feature_typeoid);	
 					
-					elog(LOG, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
+					elog(WARNING, "now, counter = %d, [%d] [%d] [%lf] [%d]\n", 
 						counter, lf_index->feature_relid, lf_index->feature_colid, lf_index->feature_upper_value,
 						lf_index->feature_typeoid);
 				}

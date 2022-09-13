@@ -646,12 +646,12 @@ OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed
     NestLoop *nsl;
     TargetEntry *tnt;
     int i;
-    int scanrelid1 = ((Scan *)cur->lefttree)->scanrelid;
-    int scanrelid2 = ((Scan *)cur->righttree)->scanrelid;
+    int scanrelid1 = ((Scan *)cur->plan->lefttree)->scanrelid;
+    int scanrelid2 = ((Scan *)cur->plan->righttree)->scanrelid;
 
     if (!Is_feature_relid(lfi, scanrelid1) && !Is_feature_relid(lfi, scanrelid2))
     {
-        elog(WARNING, "In Leaf, returning NULL.");
+        elog(WARNING, "In Leaf, returning NULL. relid = [%d, %d]", scanrelid1, scanrelid2);
         return NULL;
     }
     else
