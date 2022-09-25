@@ -437,9 +437,11 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	// bool using_feature_condition = false;
 	// bool using_part_infer = true;
-
+	
+	/*
 	lfi = makeNode(LFIndex);
 	Init_LFIndex(lfi, parse);
+	*/
 	// TODO: 将 Label 的信息保存到 Lfindex 中
 
 	if (using_feature_condition_x)
@@ -456,8 +458,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
+	/*
 	shadow = build_shadow_plan(top_plan);
-	
+	*/
 	if (using_part_infer_x && top_plan->type == T_Agg) {
 		
 		// TODO: 需要解决 JOB 数据中：可能存在多个 Filter / 需要检索到目标 Filter 的问题

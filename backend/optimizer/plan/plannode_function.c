@@ -84,7 +84,8 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 
     for (i = 1; i <= lfi->feature_num; i++)
     {
-        elog(WARNING, "feature_rel_ids length = %d", lfi->feature_rel_ids[i]->length);
+        elog(WARNING, "feature_rel_ids length = [%d], feature_relid = [%d]\n", 
+            lfi->feature_rel_ids[i]->length,  linitial_int(lfi->feature_rel_ids[i]));
     }
 
     // model weight
@@ -287,8 +288,8 @@ double find_min_value(LFIndex *lfi, int relid) {
     {
         if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->min_values[i];
-        i += 1;
     }
+    elog(WARNING, "******** Should Not Reach here(1) relid = [%d].\n", relid);
     return 10.00; // just for debug, should not reach here.
 }
 
@@ -299,8 +300,8 @@ double find_max_value(LFIndex *lfi, int relid) {
     {
         if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->max_values[i];
-        i += 1;
     }
+    elog(WARNING, "******** Should Not Reach here(2) relid = [%d].\n", relid);
     return 10.00; // just for debug, should not reach here.
 }
 
@@ -336,9 +337,21 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
     }
     else if (cur->type == T_Var) // feature 节点
     {
+        // TODO FIXME XXX
+        /* FIXME 好吧.. 这里可能写出了一些屎山(不过这些代码本身也是实验性质的)
+           总之我们现在考虑的不等式是 >= 11
+           之前忽略的一个问题是: 移项的时候, 不等号是 >= 还是 <= 是有影响的
+           现在是 >=: 因此如果系数是正的, 那么在移项的时候应该选择最大值,
+                        如果系数是负的, 那么在移项的时候应该选择最小值
+            现在, 只有 votes 对应的系数是正的, 这里使用了一些特殊判断, 不太优雅, 管用就行......
+        */
+
         if ( ((Var*)cur)->varno == delete_relid) // 当前的 Var 需要被去除
         {
-            (*deleted_value) += find_min_value(lfi, delete_relid);
+            if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
+                (*deleted_value) += find_max_value(lfi, delete_relid);
+            else
+                (*deleted_value) += find_min_value(lfi, delete_relid);
             return NULL;
         }
         else
@@ -349,7 +362,11 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
         vr = (Var *) linitial(((FuncExpr *)cur)->args);
         if (vr->varno == delete_relid)
         {
-            (*deleted_value) += find_min_value(lfi, delete_relid);
+            // TODO FIXME XXX
+            if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
+                (*deleted_value) += find_max_value(lfi, delete_relid);
+            else
+                (*deleted_value) += find_min_value(lfi, delete_relid);
             return NULL;
         }
         else   
