@@ -38,28 +38,33 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
     RangeTblEntry *rte;
     ListCell *lc;
     int i = 0;
-    lfi->feature_num = 4;
-
+    lfi->feature_num = 7;
+    elog(WARNING, "What is wrong...");
     for (i = 1; i <= lfi->feature_num; i += 1)
         lfi->feature_rel_ids[i] = NULL;
 
-    /*  当前各表对应的 Oid, 
-        暂时需要根据机器手动修改, 并且嵌入到代码中
-		16493, // title::production_year
-		30055, // votes
-		30061, // budget
-		30069  // gross
+    /*  当前各表对应的 Oid, 暂时需要根据机器手动修改, 并且嵌入到代码中
+		30126 : lineitem : l_quantity(1)  / l_extendedprice(2)
+		30117 : partsupp : ps_availqty(3) / ps_supplycost(4)
+        30111 : part     : p_retailprice(5)
+        30123 : orders   : o_totalprice(6)
+        30114 : supplier : s_acctbal(7)
 	*/
 
-    
+    elog(WARNING, "Are you OK?");
+
+    if (parse->rtable == NULL)
+        elog(WARNING, "Attention: parse->rtable is NULL.");
     i = 0;
 	foreach(lc, parse->rtable)
 	{
 		rte = (RangeTblEntry *) lfirst(lc);
+        elog(WARNING, "Can I reach here(1)?");
 		i += 1;
 		switch(rte->relid)
 		{
-			case 16493: // title::production_year
+            elog(WARNING, "Can I reach here(2)?");
+			case 30126: // TABLE[lineitem]
 
                 /*
                     BUG FIX: 下面这一行的作用是一个简单的布丁(虽然使用了很多时间排查)
@@ -67,54 +72,88 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
                 */
                 if (lfi->feature_rel_ids[1] == NULL)
 				    lfi->feature_rel_ids[1] = lappend_int(lfi->feature_rel_ids[1], i);
+
+                if (lfi->feature_rel_ids[2] == NULL)
+				    lfi->feature_rel_ids[2] = lappend_int(lfi->feature_rel_ids[2], i);
 				break;
-			case 30055: // votes
-				lfi->feature_rel_ids[2] = lappend_int(lfi->feature_rel_ids[2], i);
+			
+            case 30117: // TABLE[partsupp]
+				if (lfi->feature_rel_ids[3] == NULL)
+				    lfi->feature_rel_ids[3] = lappend_int(lfi->feature_rel_ids[3], i);
+
+                if (lfi->feature_rel_ids[4] == NULL)
+				    lfi->feature_rel_ids[4] = lappend_int(lfi->feature_rel_ids[4], i);
 				break;
-			case 30061: // budget
-				lfi->feature_rel_ids[3] = lappend_int(lfi->feature_rel_ids[3], i);
+			
+            case 30111: // TABLE[part]
+				if (lfi->feature_rel_ids[5] == NULL)
+				    lfi->feature_rel_ids[5] = lappend_int(lfi->feature_rel_ids[5], i);
 				break;
-			case 30069: // gross
-				lfi->feature_rel_ids[4] = lappend_int(lfi->feature_rel_ids[4], i);
+			
+            case 30123: // TABLE[orders]
+				if (lfi->feature_rel_ids[6] == NULL)
+				    lfi->feature_rel_ids[6] = lappend_int(lfi->feature_rel_ids[6], i);
 				break;
+
+            case 30114: // TABLE[supplier]
+                if (lfi->feature_rel_ids[7] == NULL)
+				    lfi->feature_rel_ids[7] = lappend_int(lfi->feature_rel_ids[7], i);
+                break;
+
 			default:
+                elog(WARNING, "Can I reach here, entering default(3)?");
 				break;
 		}
+        elog(WARNING, "Can I reach here(3)?");
 	}
 
+    elog(WARNING, "Switch ended...");
+    /*
     for (i = 1; i <= lfi->feature_num; i++)
     {
         elog(WARNING, "feature_rel_ids length = [%d], feature_relid = [%d]\n", 
             lfi->feature_rel_ids[i]->length,  linitial_int(lfi->feature_rel_ids[i]));
     }
-
+    */
     // model weight
-    lfi->W[0] = 24.685979;      // const value 1
-    lfi->W[1] = -0.0092697;     // title::production_year
-    lfi->W[2] = 6.9222664e-06;  // votes
-    lfi->W[3] = -5.029019e-09;  // budget
-    lfi->W[4] = -3.092156e-10;  // gross
+    lfi->W[0] = 1234.0;     // const value 1
+    lfi->W[1] = 50.0;       // l_quantity
+    lfi->W[2] = 0.2;        // l_extendedprice
+    lfi->W[3] = 0.8;        // ps_availqty
+    lfi->W[4] = 10.0;       // ps_supplycost
+    lfi->W[5] = 5.0;        // p_retailprice
+    lfi->W[6] = 0.1;        // o_totalprice
+    lfi->W[7] = 2.0;        // s_acctbal
 
     // column number
     lfi->feature_col_ids[0] = -1;   // 常数
-    lfi->feature_col_ids[1] = 5;    // production_year 是 title 的第 5 列
-    lfi->feature_col_ids[2] = 3;    // votes 是 mi_votes 的第 3 列
-    lfi->feature_col_ids[3] = 3;    // budget 是 mi_votes 的第 3 列
-    lfi->feature_col_ids[4] = 3;    // gross 是 mi_votes 的第 3 列
+    lfi->feature_col_ids[1] = 5;    // l_quantity      是 lineitem 的第 5 列
+    lfi->feature_col_ids[2] = 6;    // l_extendedprice 是 lineitem 的第 6 列
+    lfi->feature_col_ids[3] = 3;    // ps_availqty     是 partsupp 的第 3 列
+    lfi->feature_col_ids[4] = 4;    // ps_supplycost   是 partsupp 的第 4 列
+    lfi->feature_col_ids[5] = 8;    // p_retailprice   是 part     的第 8 列
+    lfi->feature_col_ids[6] = 4;    // o_totalprice    是 orders   的第 4 列
+    lfi->feature_col_ids[7] = 6;    // s_acctbal       是 supplier 的第 6 列
 
     // feature range of MIN values
     lfi->min_values[0] = 0.0;
-    lfi->min_values[1] = 1880.0;
-    lfi->min_values[2] = 5.0;
-    lfi->min_values[3] = 0.0;
-    lfi->min_values[4] = 30.0;
+    lfi->min_values[1] = 1.0;
+    lfi->min_values[2] = 901.0;
+    lfi->min_values[3] = 1.0;
+    lfi->min_values[4] = 1.0;
+    lfi->min_values[5] = 901.0;
+    lfi->min_values[6] = 857.71;
+    lfi->min_values[7] = -998.22;
 
     // feature range of MAX values
     lfi->max_values[0] = 0.0;
-    lfi->max_values[1] = 2019.0;
-    lfi->max_values[2] = 967526;
-    lfi->max_values[3] = 300000000.0;
-    lfi->max_values[4] = 4599322004.0;
+    lfi->max_values[1] = 50.0;
+    lfi->max_values[2] = 104959.0;
+    lfi->max_values[3] = 9999.0;
+    lfi->max_values[4] = 1000.0;
+    lfi->max_values[5] = 2098.99;
+    lfi->max_values[6] = 555285.16;
+    lfi->max_values[7] = 9999.72;
 
     // label-relative info
     lfi->has_upper_thd = false;
@@ -175,7 +214,8 @@ Shadow_Plan *build_shadow_plan(Plan *curplan)
 }
 
 
-/* find_sole_op: 一个工具函数, 找到整棵 Plan 树中的那个 Filter
+/* find_sole_op: 一个工具函数, 找到整棵 Plan 树中的"那个 Filter"
+ * (它的方法很简单，找到第一个 NestLoop 并保存到 FilterInfo 中)
  * 在 JOB 中, 选择找到那个 "小于不等式" 或 "大于不等式" 所对应的 Filter
  * [in] cur: 当前递归栈中所考虑的节点
  * [out] fi: 所找到的 filter 信息, 用于输出
@@ -281,24 +321,24 @@ void find_split_node
  * [out] return: relid对应的 min value 值
  */
 
-double find_min_value(LFIndex *lfi, int relid) {
+double find_min_value(LFIndex *lfi, int relid, int relcolid) {
     int i;
 
     for (i = 1; i <= lfi->feature_num; i++)
     {
-        if (list_member_int(lfi->feature_rel_ids[i], relid))
+        if (list_member_int(lfi->feature_rel_ids[i], relid) && relcolid == lfi->feature_col_ids[i])
             return lfi->min_values[i];
     }
     elog(WARNING, "******** Should Not Reach here(1) relid = [%d].\n", relid);
     return 10.00; // just for debug, should not reach here.
 }
 
-double find_max_value(LFIndex *lfi, int relid) {
+double find_max_value(LFIndex *lfi, int relid, int relcolid) {
     int i;
 
     for (i = 1; i <= lfi->feature_num; i++)
     {
-        if (list_member_int(lfi->feature_rel_ids[i], relid))
+        if (list_member_int(lfi->feature_rel_ids[i], relid) && relcolid == lfi->feature_col_ids[i])
             return lfi->max_values[i];
     }
     elog(WARNING, "******** Should Not Reach here(2) relid = [%d].\n", relid);
@@ -348,10 +388,13 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
 
         if ( ((Var*)cur)->varno == delete_relid) // 当前的 Var 需要被去除
         {
+            /* TODO
             if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
                 (*deleted_value) += find_max_value(lfi, delete_relid);
             else
                 (*deleted_value) += find_min_value(lfi, delete_relid);
+            */
+            (*deleted_value) += find_min_value(lfi, delete_relid, ((Var*)cur)->varattno);
             return NULL;
         }
         else
@@ -362,11 +405,13 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
         vr = (Var *) linitial(((FuncExpr *)cur)->args);
         if (vr->varno == delete_relid)
         {
-            // TODO FIXME XXX
+            /*
             if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
                 (*deleted_value) += find_max_value(lfi, delete_relid);
             else
                 (*deleted_value) += find_min_value(lfi, delete_relid);
+            */
+            (*deleted_value) += find_min_value(lfi, delete_relid, vr->varattno);
             return NULL;
         }
         else   

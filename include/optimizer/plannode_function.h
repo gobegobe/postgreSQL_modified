@@ -8,14 +8,14 @@
 typedef struct LFIndex {
     NodeTag type;
     int feature_num;
-    double W[5];                // Model 相关的 weight
-    List *feature_rel_ids[5];     // feature 相关的 relid
-    int feature_col_ids[5];     // feature 相关的 column number
-    double min_values[5];       // splitable_relids 中每个表的最小值，一一对应
-    double max_values[5];       // splitable_relids 中每个表的最大值，一一对应
+    double W[8];                // Model 相关的 weight
+    List *feature_rel_ids[8];     // feature 相关的 relid
+    int feature_col_ids[8];     // feature 相关的 column number
+    double min_values[8];       // splitable_relids 中每个表的最小值，一一对应
+    double max_values[8];       // splitable_relids 中每个表的最大值，一一对应
 
-    double min_conditions[5];   // 使用 lfindex 计算出的 feature condition (MIN)
-    double max_conditions[5];   // 使用 lfindex 计算出的 feature condition (MAX)
+    double min_conditions[8];   // 使用 lfindex 计算出的 feature condition (MIN)
+    double max_conditions[8];   // 使用 lfindex 计算出的 feature condition (MAX)
 
     // 保存 Label 相关信息, 未来或许会使用
     bool has_upper_thd; // default value is false;
@@ -51,8 +51,8 @@ void find_split_node
 (Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2);
 
 
-double find_min_value(LFIndex *lfi, int relid);
-double find_max_value(LFIndex *lfi, int relid);
+double find_min_value(LFIndex *lfi, int relid, int relcolid);
+double find_max_value(LFIndex *lfi, int relid, int relcolid);
 
 Const *copy_const_withdelta(Const *cur, double delta);
 

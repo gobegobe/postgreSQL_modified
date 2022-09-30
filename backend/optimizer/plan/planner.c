@@ -293,10 +293,11 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	ListCell   *lp,
 			   *lr;
 
+	Query *subq;
 	Shadow_Plan *shadow;
-	
+	Shadow_Plan *first_node;
 	OpExpr *whatever_subop;
-
+	OpExpr *first_filter;
 	LFIndex *lfi;
 	FilterInfo *fi;
 
@@ -432,35 +433,38 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		 	* part_infer 的输入需要有 lfindex 的信息
 	*/
 
-	elog(WARNING, "Configure cnodition = %d %d.\n", 
+	elog(WARNING, "Configure condition = %d %d.\n", 
 		using_feature_condition_x, using_part_infer_x);
 
 	// bool using_feature_condition = false;
 	// bool using_part_infer = true;
 	
-	/*
-	lfi = makeNode(LFIndex);
-	Init_LFIndex(lfi, parse);
-	*/
+	// lfi = makeNode(LFIndex);
+	// Init_LFIndex(lfi, parse);
 	// TODO: 将 Label 的信息保存到 Lfindex 中
 
+	/*
 	if (using_feature_condition_x)
 	{
 		add_quals_using_label_range(parse, lfi);
 	}
-
+	*/
+	
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL,
 							false, tuple_fraction);
+
+	lfi = makeNode(LFIndex);
+	Init_LFIndex(lfi, parse);
 
 	/* Select best Path and turn it into a Plan */
 	final_rel = fetch_upper_rel(root, UPPERREL_FINAL, NULL);
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
-	/*
+	elog(WARNING, "OK, I Reached checkpoint B.");
 	shadow = build_shadow_plan(top_plan);
-	*/
+	elog(WARNING, "OK, I Reached checkpoint C.");
 	if (using_part_infer_x && top_plan->type == T_Agg) {
 		
 		// TODO: 需要解决 JOB 数据中：可能存在多个 Filter / 需要检索到目标 Filter 的问题
@@ -474,18 +478,17 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
 
-		// TODO: 可以不传整个 LFIndex
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1);
+		// find_split_node 的起点是第一个 NestLoop.
+		first_node = linitial(fi->shadow_roots);
+		first_filter = linitial(fi->filter_ops);
+		find_split_node(first_node, first_node, first_node->plan->plan_rows, lfi, 1, 1);
 		
 		// Step4: 自顶向下将 Filter 向下分发
 		// 当前, 我们只认为有一个不等式可以分发.
 		elog(WARNING, "OK, I Reached checkpoint 0.");
-		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
+		distribute_joinqual_shadow(first_node, (Expr *)first_filter, lfi, &whatever_subop, 1);
 		
-		elog(WARNING, "OK, I Reached checkpoint 1.");
-	}
-	elog(WARNING, "OK, I Reached checkpoint 2.");
-	
+	}	
 	
 	/*
 	 * If creating a plan for a scrollable cursor, make sure it can run
@@ -564,7 +567,6 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		}
 		SS_finalize_plan(root, top_plan);
 	}
-	elog(WARNING, "OK, I Reached checkpoint 3.");
 	/* final cleanup of the plan */
 	Assert(glob->finalrtable == NIL);
 	Assert(glob->finalrowmarks == NIL);
@@ -580,7 +582,6 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		lfirst(lp) = set_plan_references(subroot, subplan);
 	}
-	elog(WARNING, "OK, I Reached checkpoint 4.");
 	/* build the PlannedStmt result */
 	result = makeNode(PlannedStmt);
 
@@ -635,7 +636,6 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	if (glob->partition_directory != NULL)
 		DestroyPartitionDirectory(glob->partition_directory);
 
-	elog(WARNING, "OK, I Reached checkpoint 5.");
 	return result;
 }
 
