@@ -239,4 +239,13 @@ extern Selectivity scalararraysel_containment(PlannerInfo *root,
 											  Oid elemtype, bool isEquality, bool useOr,
 											  int varRelid);
 
+extern double
+scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
+			  Oid collation,
+			  VariableStatData *vardata, Datum constval, Oid consttype);
+
+extern void
+examine_simple_variable(PlannerInfo *root, Var *var,
+						VariableStatData *vardata);
+
 #endif							/* SELFUNCS_H */

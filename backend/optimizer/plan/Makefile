@@ -22,6 +22,7 @@ OBJS = \
 	setrefs.o \
 	subselect.o \
 	lfindex.o \
-	plannode_function.o
+	plannode_function.o \
+	fuzz_infer.o
 
 include $(top_srcdir)/src/backend/common.mk

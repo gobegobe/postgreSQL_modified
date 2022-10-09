@@ -187,7 +187,7 @@ static char *convert_string_datum(Datum value, Oid typid, Oid collid,
 								  bool *failure);
 static double convert_timevalue_to_scalar(Datum value, Oid typid,
 										  bool *failure);
-static void examine_simple_variable(PlannerInfo *root, Var *var,
+void examine_simple_variable(PlannerInfo *root, Var *var,
 									VariableStatData *vardata);
 static bool get_variable_range(PlannerInfo *root, VariableStatData *vardata,
 							   Oid sortop, Oid collation,
@@ -573,17 +573,22 @@ neqsel(PG_FUNCTION_ARGS)
  * it will return an approximate estimate based on assuming that the constant
  * value falls in the middle of the bin identified by binary search.
  */
-static double
+double
 scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 			  Oid collation,
 			  VariableStatData *vardata, Datum constval, Oid consttype)
 {
+	elog(WARNING, "[Test] I am entering <scalarineqsel>");
 	Form_pg_statistic stats;
 	FmgrInfo	opproc;
 	double		mcv_selec,
 				hist_selec,
 				sumcommon;
 	double		selec;
+
+	bool b1;
+	bool b2;
+	bool b3;
 
 	if (!HeapTupleIsValid(vardata->statsTuple))
 	{
@@ -592,8 +597,18 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 		 * on the default estimate; but if the variable is CTID then we can
 		 * make an estimate based on comparing the constant to the table size.
 		 */
-		if (vardata->var && IsA(vardata->var, Var) &&
-			((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber)
+		elog(WARNING, "[Test] I reached <checkpoint-start>");
+		b1 = (vardata->var) != NULL;
+		b2 = IsA(vardata->var, Var);
+		elog(WARNING, "[Test] [b1, b2] = [%d %d]", b1, b2);
+		elog(WARNING, "[Test] [b2.type] = [%d]", ((Node *)vardata->var)->type);
+		if (b1 && b2)
+		{
+			b3 = ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber;
+			elog(WARNING, "[Test] [b3] = [%d]", b3);
+		}
+		
+		if (b1 && b2 && b3)
 		{
 			ItemPointer itemptr;
 			double		block;
@@ -659,12 +674,15 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 				selec = 1.0 - selec;
 
 			CLAMP_PROBABILITY(selec);
+			elog(WARNING, "[Test] I reached <checkpoint0>");
 			return selec;
 		}
 
 		/* no stats available, so default result */
+		elog(WARNING, "[Test] I reached <checkpoint1> DEFAULT_INEQ_SEL = [%f]", DEFAULT_INEQ_SEL);
 		return DEFAULT_INEQ_SEL;
 	}
+	elog(WARNING, "[Test] I reached <checkpoint2>");
 	stats = (Form_pg_statistic) GETSTRUCT(vardata->statsTuple);
 
 	fmgr_info(get_opcode(operator), &opproc);
@@ -825,16 +843,34 @@ histogram_selectivity(VariableStatData *vardata,
 {
 	double		result;
 	AttStatsSlot sslot;
-
+	bool b1;
+	bool b2;
+	bool b3;
 	/* check sanity of parameters */
 	Assert(n_skip >= 0);
 	Assert(min_hist_size > 2 * n_skip);
 
-	if (HeapTupleIsValid(vardata->statsTuple) &&
-		statistic_proc_security_check(vardata, opproc->fn_oid) &&
-		get_attstatsslot(&sslot, vardata->statsTuple,
+	elog(WARNING, "[test] I am entering <histogram_selectivity>");
+
+	b1 = HeapTupleIsValid(vardata->statsTuple);
+	elog(WARNING, "[test] [b1] = [%d]", b1);
+
+	if (b1)
+	{
+		b2 = statistic_proc_security_check(vardata, opproc->fn_oid);
+		elog(WARNING, "[test] [b2] = [%d]", b2);
+	}
+
+	if (b1 && b2)
+	{
+		b3 = get_attstatsslot(&sslot, vardata->statsTuple,
 						 STATISTIC_KIND_HISTOGRAM, InvalidOid,
-						 ATTSTATSSLOT_VALUES))
+						 ATTSTATSSLOT_VALUES);
+		elog(WARNING, "[test] [b3] = [%d]", b3);	
+	}
+	
+
+	if (b1 && b2 && b3)
 	{
 		*hist_size = sslot.nvalues;
 		if (sslot.nvalues >= min_hist_size)
@@ -842,7 +878,7 @@ histogram_selectivity(VariableStatData *vardata,
 			LOCAL_FCINFO(fcinfo, 2);
 			int			nmatch = 0;
 			int			i;
-
+			elog(WARNING, "<histogram_selectivity>: Entering this way...");
 			/*
 			 * We invoke the opproc "by hand" so that we won't fail on NULL
 			 * results.  Such cases won't arise for normal comparison
@@ -877,11 +913,16 @@ histogram_selectivity(VariableStatData *vardata,
 			result = ((double) nmatch) / ((double) (sslot.nvalues - 2 * n_skip));
 		}
 		else
+		{
+			elog(WARNING, "<histogram_selectivity reason1>: Sorry returning -1.");
 			result = -1;
+		}
+			
 		free_attstatsslot(&sslot);
 	}
 	else
 	{
+		elog(WARNING, "<histogram_selectivity reason2>: Sorry returning -1.");
 		*hist_size = 0;
 		result = -1;
 	}
@@ -923,7 +964,15 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 	 */
 	if (!get_restriction_variable(root, args, varRelid,
 								  &vardata, &other, &varonleft))
+	{
+		elog(WARNING, "Return default: get_restriction_variable return [false].");
 		return default_selectivity;
+	}
+
+	elog(WARNING, "vardata.var = [%p]", vardata.var);
+	elog(WARNING, "vardata.rel = [%p]", vardata.rel);
+	elog(WARNING, "vardata.statsTuple = [%p]", vardata.statsTuple);
+	elog(WARNING, "varonleft = [%d]", varonleft);
 
 	/*
 	 * If the something is a NULL constant, assume operator is strict and
@@ -955,6 +1004,7 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 								 constval, varonleft,
 								 &mcvsum);
 
+		
 		/*
 		 * If the histogram is large enough, see what fraction of it matches
 		 * the query, and assume that's representative of the non-MCV
@@ -967,6 +1017,7 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 		if (selec < 0)
 		{
 			/* Nope, fall back on default */
+			elog(WARNING, "Return default: selec < 0");
 			selec = default_selectivity;
 		}
 		else if (hist_size < 100)
@@ -1004,6 +1055,7 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 	}
 	else
 	{
+		elog(WARNING, "Return default: There is no Const node");
 		/* Comparison value is not constant, so we can't do anything */
 		selec = default_selectivity;
 	}
@@ -5008,6 +5060,7 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 	 * membership.  Note that when varRelid isn't zero, only vars of that
 	 * relation are considered "real" vars.
 	 */
+	// elog(WARNING, "In examine_variable, it is a complicated expression.");
 	varnos = pull_varnos(root, basenode);
 
 	onerel = NULL;
@@ -5015,9 +5068,11 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 	switch (bms_membership(varnos))
 	{
 		case BMS_EMPTY_SET:
+			// elog(WARNING, "--- BMS_EMPTY_SET");
 			/* No Vars at all ... must be pseudo-constant clause */
 			break;
 		case BMS_SINGLETON:
+			// elog(WARNING, "--- BMS_SINGLETON");
 			if (varRelid == 0 || bms_is_member(varRelid, varnos))
 			{
 				onerel = find_base_rel(root,
@@ -5028,19 +5083,26 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 			/* else treat it as a constant */
 			break;
 		case BMS_MULTIPLE:
+			// elog(WARNING, "--- BMS_MULTIPLE");
 			if (varRelid == 0)
 			{
+				// elog(WARNING, "var_relid == 0");
 				/* treat it as a variable of a join relation */
 				vardata->rel = find_join_rel(root, varnos);
+				// elog(WARNING, "[vardata->rel] == [%p]", vardata->rel);
 				node = basenode;	/* strip any relabeling */
 			}
 			else if (bms_is_member(varRelid, varnos))
 			{
+				// elog(WARNING, "<varnos is member!>");
 				/* ignore the vars belonging to other relations */
 				vardata->rel = find_base_rel(root, varRelid);
+				// elog(WARNING, "[vardata->rel] == [%p]", vardata->rel);
 				node = basenode;	/* strip any relabeling */
 				/* note: no point in expressional-index search here */
 			}
+			else
+				// elog(WARNING, "<varnos is NOT member!>");
 			/* else treat it as a constant */
 			break;
 	}
@@ -5053,6 +5115,7 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 
 	if (onerel)
 	{
+		// elog(WARNING, "In examine_variable, onerel is not NULL");
 		/*
 		 * We have an expression in vars of a single relation.  Try to match
 		 * it to expressional index columns, in hopes of finding some
@@ -5360,6 +5423,7 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 			}
 		}
 	}
+	
 }
 
 /*
@@ -5371,7 +5435,7 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
  *
  * We already filled in all the fields of *vardata except for the stats tuple.
  */
-static void
+void
 examine_simple_variable(PlannerInfo *root, Var *var,
 						VariableStatData *vardata)
 {
@@ -5396,6 +5460,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 		 * Plain table or parent of an inheritance appendrel, so look up the
 		 * column in pg_statistic
 		 */
+		elog(WARNING, "<examine_simple_variable> Detected a RTE_RELATION.");
 		vardata->statsTuple = SearchSysCache3(STATRELATTINH,
 											  ObjectIdGetDatum(rte->relid),
 											  Int16GetDatum(var->varattno),
@@ -5489,6 +5554,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 										ACL_SELECT) == ACLCHECK_OK) ||
 					 (pg_attribute_aclcheck(rte->relid, varattno, userid,
 											ACL_SELECT) == ACLCHECK_OK));
+				elog(WARNING, "<examine_simple_variable> And successfully returned.");
 			}
 		}
 		else
@@ -5610,6 +5676,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 		 * flattened.)	There's not much we can do with function outputs, but
 		 * maybe someday try to be smarter about VALUES and/or CTEs.
 		 */
+		 elog(WARNING, "<examine_simple_variable> Nothing happens...");
 	}
 }
 

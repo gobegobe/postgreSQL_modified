@@ -58,6 +58,7 @@
 #include "optimizer/plannode_function.h"
 #include "optimizer/lfindex.h"
 
+
 #include "parser/analyze.h"
 #include "parser/parse_agg.h"
 #include "parser/parsetree.h"
@@ -70,6 +71,9 @@
 #include "utils/syscache.h"
 #include "utils/numeric.h"
 #include "utils/selfuncs.h"
+
+#include "catalog/pg_statistic_d.h"
+#include "optimizer/fuzz_infer.h"
 
 /* GUC parameters */
 double		cursor_tuple_fraction = DEFAULT_CURSOR_TUPLE_FRACTION;
@@ -412,7 +416,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 
 	// (ruilin) 改动起始处
-	elog(WARNING, "Configure cnodition = [%d] | [%d].\n", 
+	elog(WARNING, "Configure condition = [%d] | [%d].\n", 
 		using_feature_condition_x, using_part_infer_x);
 
 	/*
@@ -432,6 +436,40 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
+	bool testing = true;
+	if (testing)
+	{
+	
+		int i;
+		VariableStatData vardata;
+		AttStatsSlot sslot;
+		OpExpr *top_op = linitial(((NestLoop *)top_plan)->join.joinqual);		
+		Var *var0 = lsecond(((OpExpr *) linitial(top_op->args))->args);
+		
+		// elog(WARNING, "var0->type = [%d], T_Var = [%d]", ((Node*) var0)->type, T_Var);
+		elog(WARNING, "avg(var0) = [%lf]", query_var_average(root, var0));
+		
+		/*
+		if (((Node*) var0)->type == T_Var)
+		{
+			elog(WARNING, "var0 is a Var.");
+			examine_variable(root, var0, 0, &vardata);
+			
+			elog(WARNING, "vardata.vartype = [%d]", vardata.vartype);	// 1700 NUMERICOID
+			elog(WARNING, "vardata.atttype = [%d]", vardata.atttype);
+			elog(WARNING, "vardata.statsTuple = [%p]", vardata.statsTuple);
+
+			get_attstatsslot(&sslot, vardata.statsTuple, STATISTIC_KIND_HISTOGRAM,
+			0, ATTSTATSSLOT_VALUES);
+
+			
+			elog(WARNING, "sslot.nvalues = [%d]", sslot.nvalues);
+			for (i = 0; i < sslot.nvalues; i += 1)
+				elog(WARNING, "sslot.values[i] = [%d] [%lf]", sslot.values[i], constvalue_to_double(sslot.values[i]));
+			
+		}
+		*/
+	}
 
 	/*
 	shadow = build_shadow_plan(top_plan);
@@ -443,12 +481,12 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
 		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1);
-		elog(WARNING, "OK, reached <distribute_joinqual_shadow>");
+		// elog(WARNING, "OK, reached <distribute_joinqual_shadow>");
 
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), 
 			lfi, &whatever_subop, 1);
 
-		elog(WARNING, "OK, out of <distribute_joinqual_shadow>");
+		// elog(WARNING, "OK, out of <distribute_joinqual_shadow>");
 	}
 
 
@@ -529,7 +567,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		}
 		SS_finalize_plan(root, top_plan);
 	}
-	elog(WARNING, "OK, I Reached checkpoint 3.");
+	// elog(WARNING, "OK, I Reached checkpoint 3.");
 	/* final cleanup of the plan */
 	Assert(glob->finalrtable == NIL);
 	Assert(glob->finalrowmarks == NIL);
@@ -545,7 +583,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		lfirst(lp) = set_plan_references(subroot, subplan);
 	}
-	elog(WARNING, "OK, I Reached checkpoint 4.");
+	// elog(WARNING, "OK, I Reached checkpoint 4.");
 	/* build the PlannedStmt result */
 	result = makeNode(PlannedStmt);
 
@@ -600,7 +638,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	if (glob->partition_directory != NULL)
 		DestroyPartitionDirectory(glob->partition_directory);
 
-	elog(WARNING, "OK, I Reached checkpoint 5.");
+	// elog(WARNING, "OK, I Reached checkpoint 5.");
 	return result;
 }
 
