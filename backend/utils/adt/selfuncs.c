@@ -578,7 +578,7 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 			  Oid collation,
 			  VariableStatData *vardata, Datum constval, Oid consttype)
 {
-	elog(WARNING, "[Test] I am entering <scalarineqsel>");
+	// elog(WARNING, "[Test] I am entering <scalarineqsel>");
 	Form_pg_statistic stats;
 	FmgrInfo	opproc;
 	double		mcv_selec,
@@ -5460,7 +5460,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 		 * Plain table or parent of an inheritance appendrel, so look up the
 		 * column in pg_statistic
 		 */
-		elog(WARNING, "<examine_simple_variable> Detected a RTE_RELATION.");
+		// elog(WARNING, "<examine_simple_variable> Detected a RTE_RELATION.");
 		vardata->statsTuple = SearchSysCache3(STATRELATTINH,
 											  ObjectIdGetDatum(rte->relid),
 											  Int16GetDatum(var->varattno),

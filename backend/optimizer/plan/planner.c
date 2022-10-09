@@ -436,39 +436,14 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
-	bool testing = true;
+	bool testing = 1;
 	if (testing)
 	{
-	
-		int i;
-		VariableStatData vardata;
-		AttStatsSlot sslot;
 		OpExpr *top_op = linitial(((NestLoop *)top_plan)->join.joinqual);		
-		Var *var0 = lsecond(((OpExpr *) linitial(top_op->args))->args);
 		
-		// elog(WARNING, "var0->type = [%d], T_Var = [%d]", ((Node*) var0)->type, T_Var);
-		elog(WARNING, "avg(var0) = [%lf]", query_var_average(root, var0));
-		
-		/*
-		if (((Node*) var0)->type == T_Var)
-		{
-			elog(WARNING, "var0 is a Var.");
-			examine_variable(root, var0, 0, &vardata);
-			
-			elog(WARNING, "vardata.vartype = [%d]", vardata.vartype);	// 1700 NUMERICOID
-			elog(WARNING, "vardata.atttype = [%d]", vardata.atttype);
-			elog(WARNING, "vardata.statsTuple = [%p]", vardata.statsTuple);
+		OpExpr *wtvop;
+		wtvop = copy_and_transpose(root, top_op, 5);
 
-			get_attstatsslot(&sslot, vardata.statsTuple, STATISTIC_KIND_HISTOGRAM,
-			0, ATTSTATSSLOT_VALUES);
-
-			
-			elog(WARNING, "sslot.nvalues = [%d]", sslot.nvalues);
-			for (i = 0; i < sslot.nvalues; i += 1)
-				elog(WARNING, "sslot.values[i] = [%d] [%lf]", sslot.values[i], constvalue_to_double(sslot.values[i]));
-			
-		}
-		*/
 	}
 
 	/*
