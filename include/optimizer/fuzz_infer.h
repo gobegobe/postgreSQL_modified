@@ -1,3 +1,6 @@
+#ifndef fuzz_inferh
+#define fuzz_inferh
+
 #include "postgres.h"
 #include <limits.h>
 #include <math.h>
@@ -27,7 +30,8 @@
 #include "optimizer/tlist.h"
 #include "utils/float.h"
 
-
+#include "optimizer/lfindex.h"
+#include "optimizer/plannode_function.h"
 
 /* 在给定全局信息 PlannerInfo 的情况下, 通过直方图查询 var 这一列的平均值 */
 double query_var_average(PlannerInfo *root, Var *var);
@@ -59,3 +63,24 @@ double datum_to_double(Datum datum);
 
 /* 创建一个 Const 节点，其中的值为 v */
 Const *create_const_from_double(double v);
+
+// ********************** 第二步相关 *******************
+List * move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pni);
+
+bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_node);
+
+double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_relid);
+
+double get_join_cost(Shadow_Plan *cur_node);
+
+Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node);
+
+
+
+// ********************** 第三步相关 *******************
+
+List *transfer_node_to_list(Shadow_Plan* root);
+
+void merge_filter(Shadow_Plan *root, List *opt_join_node_list);
+
+#endif

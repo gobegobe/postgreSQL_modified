@@ -1,8 +1,13 @@
+#ifndef lfindex_h
+#define lfindex_h
+
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
 #include "nodes/nodes.h"
+
+#include "optimizer/plannode_function.h"
 
 // LabelFeatureIndex
 typedef struct RangeInfo {
@@ -53,3 +58,5 @@ Const *create_const_node(double up_thd);
 OpExpr *create_additional_upper_qual(int rtb_id, int rtb_col, const double up_thd, int typeoid);
 
 OpExpr *create_additional_lower_qual(int rtb_id, int rtb_col, const double lo_thd, int typeoid);
+
+#endif

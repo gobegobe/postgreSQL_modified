@@ -586,10 +586,6 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 				sumcommon;
 	double		selec;
 
-	bool b1;
-	bool b2;
-	bool b3;
-
 	if (!HeapTupleIsValid(vardata->statsTuple))
 	{
 		/*
@@ -597,18 +593,10 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 		 * on the default estimate; but if the variable is CTID then we can
 		 * make an estimate based on comparing the constant to the table size.
 		 */
-		elog(WARNING, "[Test] I reached <checkpoint-start>");
-		b1 = (vardata->var) != NULL;
-		b2 = IsA(vardata->var, Var);
-		elog(WARNING, "[Test] [b1, b2] = [%d %d]", b1, b2);
-		elog(WARNING, "[Test] [b2.type] = [%d]", ((Node *)vardata->var)->type);
-		if (b1 && b2)
-		{
-			b3 = ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber;
-			elog(WARNING, "[Test] [b3] = [%d]", b3);
-		}
 		
-		if (b1 && b2 && b3)
+		if ((vardata->var) != NULL && 
+			IsA(vardata->var, Var) && 
+			((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber)
 		{
 			ItemPointer itemptr;
 			double		block;
@@ -674,15 +662,15 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 				selec = 1.0 - selec;
 
 			CLAMP_PROBABILITY(selec);
-			elog(WARNING, "[Test] I reached <checkpoint0>");
+			// elog(WARNING, "[Test] I reached <checkpoint0>");
 			return selec;
 		}
 
 		/* no stats available, so default result */
-		elog(WARNING, "[Test] I reached <checkpoint1> DEFAULT_INEQ_SEL = [%f]", DEFAULT_INEQ_SEL);
+		// elog(WARNING, "[Test] I reached <checkpoint1> DEFAULT_INEQ_SEL = [%f]", DEFAULT_INEQ_SEL);
 		return DEFAULT_INEQ_SEL;
 	}
-	elog(WARNING, "[Test] I reached <checkpoint2>");
+	// elog(WARNING, "[Test] I reached <checkpoint2>");
 	stats = (Form_pg_statistic) GETSTRUCT(vardata->statsTuple);
 
 	fmgr_info(get_opcode(operator), &opproc);
@@ -843,34 +831,16 @@ histogram_selectivity(VariableStatData *vardata,
 {
 	double		result;
 	AttStatsSlot sslot;
-	bool b1;
-	bool b2;
-	bool b3;
 	/* check sanity of parameters */
 	Assert(n_skip >= 0);
 	Assert(min_hist_size > 2 * n_skip);
 
-	elog(WARNING, "[test] I am entering <histogram_selectivity>");
 
-	b1 = HeapTupleIsValid(vardata->statsTuple);
-	elog(WARNING, "[test] [b1] = [%d]", b1);
-
-	if (b1)
-	{
-		b2 = statistic_proc_security_check(vardata, opproc->fn_oid);
-		elog(WARNING, "[test] [b2] = [%d]", b2);
-	}
-
-	if (b1 && b2)
-	{
-		b3 = get_attstatsslot(&sslot, vardata->statsTuple,
+	if (HeapTupleIsValid(vardata->statsTuple) && 
+		statistic_proc_security_check(vardata, opproc->fn_oid) && 
+		get_attstatsslot(&sslot, vardata->statsTuple,
 						 STATISTIC_KIND_HISTOGRAM, InvalidOid,
-						 ATTSTATSSLOT_VALUES);
-		elog(WARNING, "[test] [b3] = [%d]", b3);	
-	}
-	
-
-	if (b1 && b2 && b3)
+						 ATTSTATSSLOT_VALUES))
 	{
 		*hist_size = sslot.nvalues;
 		if (sslot.nvalues >= min_hist_size)
@@ -878,7 +848,7 @@ histogram_selectivity(VariableStatData *vardata,
 			LOCAL_FCINFO(fcinfo, 2);
 			int			nmatch = 0;
 			int			i;
-			elog(WARNING, "<histogram_selectivity>: Entering this way...");
+			// elog(WARNING, "<histogram_selectivity>: Entering this way...");
 			/*
 			 * We invoke the opproc "by hand" so that we won't fail on NULL
 			 * results.  Such cases won't arise for normal comparison
@@ -914,7 +884,7 @@ histogram_selectivity(VariableStatData *vardata,
 		}
 		else
 		{
-			elog(WARNING, "<histogram_selectivity reason1>: Sorry returning -1.");
+			// elog(WARNING, "<histogram_selectivity reason1>: Sorry returning -1.");
 			result = -1;
 		}
 			
@@ -922,7 +892,7 @@ histogram_selectivity(VariableStatData *vardata,
 	}
 	else
 	{
-		elog(WARNING, "<histogram_selectivity reason2>: Sorry returning -1.");
+		// elog(WARNING, "<histogram_selectivity reason2>: Sorry returning -1.");
 		*hist_size = 0;
 		result = -1;
 	}
@@ -965,15 +935,15 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 	if (!get_restriction_variable(root, args, varRelid,
 								  &vardata, &other, &varonleft))
 	{
-		elog(WARNING, "Return default: get_restriction_variable return [false].");
+		// elog(WARNING, "Return default: get_restriction_variable return [false].");
 		return default_selectivity;
 	}
-
+	/*
 	elog(WARNING, "vardata.var = [%p]", vardata.var);
 	elog(WARNING, "vardata.rel = [%p]", vardata.rel);
 	elog(WARNING, "vardata.statsTuple = [%p]", vardata.statsTuple);
 	elog(WARNING, "varonleft = [%d]", varonleft);
-
+	*/
 	/*
 	 * If the something is a NULL constant, assume operator is strict and
 	 * return zero, ie, operator will never return TRUE.
@@ -1017,7 +987,7 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 		if (selec < 0)
 		{
 			/* Nope, fall back on default */
-			elog(WARNING, "Return default: selec < 0");
+			// elog(WARNING, "Return default: selec < 0");
 			selec = default_selectivity;
 		}
 		else if (hist_size < 100)
@@ -1055,7 +1025,7 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 	}
 	else
 	{
-		elog(WARNING, "Return default: There is no Const node");
+		// elog(WARNING, "Return default: There is no Const node");
 		/* Comparison value is not constant, so we can't do anything */
 		selec = default_selectivity;
 	}
@@ -5101,7 +5071,6 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 				node = basenode;	/* strip any relabeling */
 				/* note: no point in expressional-index search here */
 			}
-			else
 				// elog(WARNING, "<varnos is NOT member!>");
 			/* else treat it as a constant */
 			break;
@@ -5554,7 +5523,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 										ACL_SELECT) == ACLCHECK_OK) ||
 					 (pg_attribute_aclcheck(rte->relid, varattno, userid,
 											ACL_SELECT) == ACLCHECK_OK));
-				elog(WARNING, "<examine_simple_variable> And successfully returned.");
+				// elog(WARNING, "<examine_simple_variable> And successfully returned.");
 			}
 		}
 		else
@@ -5676,7 +5645,7 @@ examine_simple_variable(PlannerInfo *root, Var *var,
 		 * flattened.)	There's not much we can do with function outputs, but
 		 * maybe someday try to be smarter about VALUES and/or CTEs.
 		 */
-		 elog(WARNING, "<examine_simple_variable> Nothing happens...");
+		 // elog(WARNING, "<examine_simple_variable> Nothing happens...");
 	}
 }
 

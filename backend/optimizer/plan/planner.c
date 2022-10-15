@@ -419,15 +419,21 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	elog(WARNING, "Configure condition = [%d] | [%d].\n", 
 		using_feature_condition_x, using_part_infer_x);
 
-	/*
-	lfi = makeNode(LFIndex);
-	Init_LFIndex(lfi, parse);
-	*/
+	if (using_feature_condition_x || using_part_infer_x)
+	{
+		lfi = makeNode(LFIndex);
+		Init_LFIndex(lfi, parse);
+	}
+	
+	
+	elog(WARNING, "check point <0>.");
 
+	/*
 	if (using_feature_condition_x)
 	{
 		add_quals_using_label_range(parse, lfi);
 	}
+	*/
 
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL, false, tuple_fraction);
@@ -436,7 +442,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
-	bool testing = 1;
+	elog(WARNING, "check point <1>.");
+	/*
+	bool testing = 0;
 	if (testing)
 	{
 		OpExpr *top_op = linitial(((NestLoop *)top_plan)->join.joinqual);		
@@ -445,11 +453,14 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		wtvop = copy_and_transpose(root, top_op, 5);
 
 	}
-
-	/*
-	shadow = build_shadow_plan(top_plan);
 	*/
 
+	if (using_feature_condition_x || using_part_infer_x)
+	{
+		shadow = build_shadow_plan(top_plan);
+	}
+	
+	elog(WARNING, "check point <2>.");
 	if (using_part_infer_x && top_plan->type == T_Agg) {
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
@@ -463,7 +474,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		// elog(WARNING, "OK, out of <distribute_joinqual_shadow>");
 	}
-
+	
 
 	/*
 	 * If creating a plan for a scrollable cursor, make sure it can run

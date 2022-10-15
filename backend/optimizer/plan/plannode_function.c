@@ -59,7 +59,7 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 		i += 1;
 		switch(rte->relid)
 		{
-			case 16493: // title::production_year
+			case 16512: // title::production_year
 
                 /*
                     BUG FIX: 下面这一行的作用是一个简单的布丁(虽然使用了很多时间排查)
@@ -68,13 +68,13 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
                 if (lfi->feature_rel_ids[1] == NULL)
 				    lfi->feature_rel_ids[1] = lappend_int(lfi->feature_rel_ids[1], i);
 				break;
-			case 30055: // votes
+			case 30114: // votes
 				lfi->feature_rel_ids[2] = lappend_int(lfi->feature_rel_ids[2], i);
 				break;
-			case 30061: // budget
+			case 30120: // budget
 				lfi->feature_rel_ids[3] = lappend_int(lfi->feature_rel_ids[3], i);
 				break;
-			case 30069: // gross
+			case 30126: // gross
 				lfi->feature_rel_ids[4] = lappend_int(lfi->feature_rel_ids[4], i);
 				break;
 			default:
@@ -287,7 +287,6 @@ double find_min_value(LFIndex *lfi, int relid) {
     {
         if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->min_values[i];
-        i += 1;
     }
     return 10.00; // just for debug, should not reach here.
 }
@@ -299,7 +298,6 @@ double find_max_value(LFIndex *lfi, int relid) {
     {
         if (list_member_int(lfi->feature_rel_ids[i], relid))
             return lfi->max_values[i];
-        i += 1;
     }
     return 10.00; // just for debug, should not reach here.
 }
@@ -336,9 +334,14 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
     }
     else if (cur->type == T_Var) // feature 节点
     {
+        // 屎山是这里吗？
         if ( ((Var*)cur)->varno == delete_relid) // 当前的 Var 需要被去除
         {
-            (*deleted_value) += find_min_value(lfi, delete_relid);
+            if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
+                (*deleted_value) += find_max_value(lfi, delete_relid);
+            else
+                (*deleted_value) += find_min_value(lfi, delete_relid);
+
             return NULL;
         }
         else
@@ -349,7 +352,10 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
         vr = (Var *) linitial(((FuncExpr *)cur)->args);
         if (vr->varno == delete_relid)
         {
-            (*deleted_value) += find_min_value(lfi, delete_relid);
+            if (list_member_int(lfi->feature_rel_ids[2], delete_relid))
+                (*deleted_value) += find_max_value(lfi, delete_relid);
+            else
+                (*deleted_value) += find_min_value(lfi, delete_relid);
             return NULL;
         }
         else   
@@ -432,7 +438,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
             break;
 
         default:
-            elog(WARNING, "Error 114514: Met some trouble...\n");
+            elog(WARNING, "Error 114514: Met some trouble... opno = [%d]\n", opcur->opno);
             assert(false);
             break;
     }
@@ -446,6 +452,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
  * min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  */
 
+/*
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
 
     // 变量定义(为了遵循源代码风格)
@@ -570,6 +577,100 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         }
         // else: cur 是一个 Scan 节点, do nothing
     }
+}
+*/
+
+void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
+
+    // 变量定义(为了遵循源代码风格)
+    Plan *lefttree;
+    Plan *righttree;
+    Scan *othertree;
+    NestLoop *nsl;
+
+    Expr *modified_op;
+    OpExpr *middle_result;
+    OpExpr *sub_result;
+
+    double whatever;
+    int delete_relid;
+    
+    // 变量定义结束
+
+    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
+
+    whatever = 0;
+    sub_result = NULL;
+    lefttree = cur->plan->lefttree;
+    righttree = cur->plan->righttree;
+
+    
+
+    nsl = (NestLoop*) cur->plan;
+    lfi->split_node_deepest = depth;
+
+    if (lefttree->type == T_NestLoop)
+    {
+        elog(WARNING, "depth = %d, entering way [1].\n", depth);
+        othertree = (Scan*) cur->plan->righttree;
+        delete_relid = othertree->scanrelid;
+        
+        if (op_passed_tome != NULL && Is_feature_relid(lfi, delete_relid))
+        {
+            if (depth != 1)
+            {
+                elog(WARNING, "depth = %d, using op_passed_tome.\n", depth);
+                nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
+            }
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+        }
+        else
+            modified_op = op_passed_tome;
+        
+        distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
+        
+        elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
+        middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
+        *subop = middle_result; 
+        
+    }
+    
+    else if (righttree->type == T_NestLoop)
+    {
+        elog(WARNING, "depth = %d, entering way [2].\n", depth);
+        othertree = (Scan*) cur->plan->lefttree;
+        delete_relid = othertree->scanrelid;
+
+        if (op_passed_tome != NULL && depth != 1 && Is_feature_relid(lfi, delete_relid))
+        {
+            if (depth != 1)
+            {
+                elog(WARNING, "depth = %d, using op_passed_tome.\n", depth);
+                nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
+            }
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+        }
+        else
+            modified_op = op_passed_tome;
+
+        
+        distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
+
+        elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
+        middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
+        *subop = middle_result; 
+        
+    }
+
+    else // 已经到达叶子
+    { 
+        elog(WARNING, "depth = %d, entering way [3].\n", depth);
+        elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
+        middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
+        *subop = middle_result; 
+        
+    }
+
 }
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 

@@ -1,3 +1,6 @@
+#ifndef plannodefunction_h
+#define plannodefunction_h
+
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
@@ -74,3 +77,6 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const) ;
 // 关于建立节点
 
 Const *my_make_const(int value);
+
+
+#endif
