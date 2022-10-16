@@ -58,8 +58,9 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                     Var **obj_var, double *obj_ratio, double *deleted_value);
 
 
-/* 将 datum 所包含的浮点数换成可以被 C 语言处理的 double 类型 */
+/* 将 datum 所包含的浮点数换成可以被 C 语言处理的类型 */
 double datum_to_double(Datum datum);
+double datum_to_int(Datum datum);
 
 /* 创建一个 Const 节点，其中的值为 v */
 Const *create_const_from_double(double v);

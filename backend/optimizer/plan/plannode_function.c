@@ -52,7 +52,8 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 	*/
 
     
-    i = 0;
+    i = 0; 
+
 	foreach(lc, parse->rtable)
 	{
 		rte = (RangeTblEntry *) lfirst(lc);
@@ -81,12 +82,12 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 				break;
 		}
 	}
-
+    /*
     for (i = 1; i <= lfi->feature_num; i++)
     {
         elog(WARNING, "feature_rel_ids length = %d", lfi->feature_rel_ids[i]->length);
     }
-
+    */
     // model weight
     lfi->W[0] = 24.685979;      // const value 1
     lfi->W[1] = -0.0092697;     // title::production_year

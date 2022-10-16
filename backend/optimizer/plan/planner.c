@@ -457,11 +457,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	if (using_feature_condition_x || using_part_infer_x)
 	{
-		shadow = build_shadow_plan(top_plan);
+		if (top_plan->type == T_Agg)
+			shadow = build_shadow_plan(top_plan);
 	}
 	
 	elog(WARNING, "check point <2>.");
-	if (using_part_infer_x && top_plan->type == T_Agg) {
+	if (using_part_infer_x && top_plan->type == T_Agg) 
+	{
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
 		fi->filter_ops = NULL;
@@ -469,10 +471,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1);
 		// elog(WARNING, "OK, reached <distribute_joinqual_shadow>");
 
-		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), 
-			lfi, &whatever_subop, 1);
+		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
+		List *opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root);
+		elog(WARNING, "OK, out of <move_filter_local_optimal>");
+		elog(WARNING, "opt_list.length = [%d]", opt_list->length);
+		merge_filter(linitial(fi->shadow_roots), opt_list);
 
-		// elog(WARNING, "OK, out of <distribute_joinqual_shadow>");
+		
 	}
 	
 

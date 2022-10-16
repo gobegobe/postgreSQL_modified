@@ -44,26 +44,39 @@ double query_var_average(PlannerInfo *root, Var *var)
     int sz;
     VariableStatData vardata;
 	AttStatsSlot sslot;
+    double answer;
 
     if (!IsA(var, Var))
     {
         elog(WARNING, "<query_var_average> TYPE_ERROR: arg->type = [%d], T_Var = [%d]", ((Node*)var)->type, T_Var);
         return 0.0;
     }
+    else
+    {
+        elog(WARNING, "<query_var_average> querying for a Var..., varno = [%d]", var->varno);
+    }
     
 
     examine_variable(root, (Node *)var, 0, &vardata);
+    elog(WARNING, "<examine_variable> is ok.");
     get_attstatsslot(&sslot, vardata.statsTuple, STATISTIC_KIND_HISTOGRAM,
 			0, ATTSTATSSLOT_VALUES);
+    elog(WARNING, "<get_attstatsslot> is ok.");
     sz = sslot.nvalues;
-
+    elog(WARNING, "[sslot.nvalues] = [%d]", sz);
     if (sz == 0)
     {
         elog(WARNING, "<query_var_average> size == 0, returnning 0.0");
         return 0.0;
     }
     
-    return datum_to_double(sslot.values[(sz + 1) / 2]);
+    // FIXME: only for JOB
+    if (var->vartype == INT4OID)
+        answer = datum_to_int(sslot.values[(sz + 1) / 2]);
+    else
+        answer = datum_to_double(sslot.values[(sz + 1) / 2]);
+    elog(WARNING, "answer = [%lf]", answer);
+    return answer;
 }
 
 
@@ -79,17 +92,30 @@ OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
     Const *const_value = (Const *) lsecond(curop->args);
     Const *new_const;
 
+
+    elog(WARNING, "<copy_and_transpose> reserve_relid = [%d].", reserve_relid);
     collect_var_info(root, (Expr *)agri_expr, reserve_relid, &obj_var, &obj_ratio, &deleted_value);
 
-    if ((obj_ratio < 0 ? -obj_ratio : obj_ratio) < 1e-9)
+
+
+    if ((obj_ratio < 0 ? -obj_ratio : obj_ratio) < 1e-15)
     {
-        elog(ERROR, "<copy_and_transpose> obj_ratio = 0.");
+        elog(ERROR, "<copy_and_transpose> [Fail] obj_ratio = [%.20f].", obj_ratio);
     }
+
+    elog(WARNING, "<copy_and_transpose> [Okay] obj_ratio = [%.20f].", obj_ratio);
     new_value = (datum_to_double(const_value->constvalue) - deleted_value) / obj_ratio;
+
+
+    elog(WARNING, "<copy_and_transpose> [Okay] deleted_value = [%.10f].", deleted_value);
+    elog(WARNING, "<copy_and_transpose> [Okay] const_value = [%.10f].", datum_to_double(const_value->constvalue));
+
+    if (obj_ratio < 0)
+        new_value = -new_value;
 
     // TODO 接下来应该是利用 obj_bar 和  new_value 组成一个新的 OpExpr
     // 然后用这个 OpExpr 来获得选择率
-    copied_var = (Var *) copyObject(curop);
+    copied_var = (Var *) copyObject(obj_var);
     new_const = create_const_from_double(new_value);
     copied_cur = (OpExpr *) copyObject(curop);
     copied_cur->args = list_make2(copied_var, new_const);
@@ -113,7 +139,19 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
     if (IsA(cur, Var))
     {
         curvar = (Var *) cur;
-        elog(WARNING, "[curvar->varno] = [%d]", curvar->varno);
+        elog(WARNING, "[Var] [curvar->varno] = [%d]", curvar->varno);
+        if (curvar->varno == reserve_relid)
+        {
+            *obj_var = curvar;
+            return true;
+        }    
+        else
+            return false;
+    }
+    else if (IsA(cur, FuncExpr))
+    {
+        curvar = (Var *) linitial(((FuncExpr *)cur)->args);
+        elog(WARNING, "[FuncExpr] [curvar->varno] = [%d]", curvar->varno);
         if (curvar->varno == reserve_relid)
         {
             *obj_var = curvar;
@@ -126,6 +164,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
     {
         return false;
     }
+    
 
 
     opcur = (OpExpr *) cur;
@@ -135,10 +174,10 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
     switch (opcur->opno)
     {
         case 1758:   // '+' for NUMERIC
-
+            elog(WARNING, "<> <> Entering 1758.");
             lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
             rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
-            elog(WARNING, "<> <> Entering 1758.");
+            
 
             if (lresult || rresult)
             {
@@ -147,6 +186,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
 
             if (!lresult)
             {
+                elog(WARNING, "[result 1.1]");
                 if (IsA(lefttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) lefttree);
@@ -157,10 +197,17 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                     sonconst = (Const *) lefttree;
                     *deleted_value += datum_to_double(sonconst->constvalue);
                 }
+
+                if (IsA(lefttree, FuncExpr))
+                {
+                    curvar = (Var *) linitial(((FuncExpr *)cur)->args);
+                    *deleted_value += query_var_average(root, curvar);
+                }
             }
 
             if (!rresult)
             {
+                elog(WARNING, "[result 1.2]");
                 if (IsA(righttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) righttree);
@@ -171,35 +218,66 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                     sonconst = (Const *) righttree;
                     *deleted_value += datum_to_double(sonconst->constvalue);
                 }
+
+                if (IsA(righttree, FuncExpr))
+                {
+                    curvar = (Var *) linitial(((FuncExpr *)cur)->args);
+                    *deleted_value += query_var_average(root, curvar);
+                }
             }
             
 
             break;
         
         case 1760:   // '*' for NUMERIC;
-
+            elog(WARNING, "<> <> Entering 1760.");
             lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
             rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
 
             if (lresult)
             {
+                elog(WARNING, "[result 2.1]");
                 sonconst = (Const *) righttree;
                 *obj_ratio = datum_to_double(sonconst->constvalue);
             }
             else if (rresult)
             {
+                elog(WARNING, "[result 2.2]");
                 sonconst = (Const *) lefttree;
                 *obj_ratio = datum_to_double(sonconst->constvalue);
             }
             else if (IsA(lefttree, Var))
             {
+                elog(WARNING, "[result 2.3]");
                 sonconst = (Const *) righttree;
                 *deleted_value += query_var_average(root, (Var *)lefttree) * datum_to_double(sonconst->constvalue);
             }
+            else if(IsA(lefttree, FuncExpr))
+            {
+                elog(WARNING, "[result 2.4]");
+                sonconst = (Const *) righttree;
+                curvar = (Var *) linitial(((FuncExpr *)lefttree)->args);
+                *deleted_value += query_var_average(root, curvar) * datum_to_double(sonconst->constvalue);
+            }
             else if (IsA(righttree, Var))
             {
+                elog(WARNING, "[result 2.5]");
                 sonconst = (Const *) lefttree;
                 *deleted_value += query_var_average(root, (Var *)righttree) * datum_to_double(sonconst->constvalue);
+            }
+            else if(IsA(righttree, FuncExpr))
+            {
+                elog(WARNING, "[result 2.6]");
+                sonconst = (Const *) lefttree;
+                curvar = (Var *) linitial(((FuncExpr *)righttree)->args);
+                /*
+                elog(WARNING, "type = [%d] ,T_Var = [%d]", ((Node*)curvar)->type, T_Var);
+                double v1 = query_var_average(root, curvar);
+                elog(WARNING, "[result 2.6] v1 = [%lf]", v1);
+                double v2 = datum_to_double(sonconst->constvalue);
+                elog(WARNING, "[result 2.6] v2 = [%lf]", v2);
+                */
+                *deleted_value += query_var_average(root, curvar) * datum_to_double(sonconst->constvalue);
             }
             else 
                 elog(WARNING, "<collect_var_info> Well, I do not know what happened.");
@@ -208,6 +286,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
             break;
 
         default:
+            elog(WARNING, "I don't think this is a OpExpr, type = [%d]", ((Node *)opcur) -> type);
             elog(WARNING, "<collect_var_info> Detected quirky opno: [%d]", opcur->opno);
     }
     return false;
@@ -223,8 +302,8 @@ List *move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pn
     Shadow_Plan *end_node;
     Shadow_Plan *local_opt_node;
     List *result_list = NIL;       // empty list
-
     bool has_segment;
+    ListCell *lc;
 
     while (IsA(begin_node->plan, NestLoop))
     {
@@ -233,10 +312,19 @@ List *move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pn
             break;
         else
         {
+            elog(WARNING, "Using [move_filter_toopt]!\n");
             local_opt_node = move_filter_toopt(pni, begin_node, end_node);
             result_list = lappend(result_list, local_opt_node);
             begin_node = end_node->lefttree;
         }
+    }
+
+    elog(WARNING, "\n res of move_filter_local_optimal: ");
+    begin_node = root;
+    while (IsA(begin_node->plan, NestLoop))
+    {
+        elog(WARNING, "is local optimal = [%d]", list_member_ptr(result_list, begin_node));
+        begin_node = begin_node->lefttree;
     }
 
     return result_list;
@@ -281,12 +369,44 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
 double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_relid)
 {
     OpExpr *transed_op = copy_and_transpose(pnl, cur_op, reserve_relid);
-
     int oproid = transed_op->opno;
     int collation = transed_op->opcollid;
     List *args = transed_op->args;
-    int varRelid = ((Var *) linitial(args))->varno;
-    double res = generic_restriction_selectivity(pnl, oproid, collation, args, varRelid, 0.1);
+    Var *cur_var = (Var *) linitial(args);
+    Const *cur_const = (Const *) lsecond(args);
+    Datum constval = cur_const->constvalue;
+
+    double res;
+    VariableStatData vardata;
+
+    elog(WARNING, "<get_filter_selectivity> returning oproid [%d]", oproid);
+    elog(WARNING, "<get_filter_selectivity> returning collation [%d]", collation);
+
+    
+    // examine_variable(root, (Node *)var, 0, &vardata);
+    examine_variable(pnl, (Node *)cur_var, 0, &vardata);
+
+    /*
+    double
+    scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
+			  Oid collation,
+			  VariableStatData *vardata, Datum constval, Oid consttype)
+    */
+    
+    FmgrInfo	opproc;
+    fmgr_info(get_opcode(1757), &opproc);
+
+    // res = scalarineqsel(pnl, 1757, true, true, 0, &vardata, constval, NUMERICOID);
+    /*
+    double
+    ineq_histogram_selectivity(PlannerInfo *root,
+						   VariableStatData *vardata,
+						   Oid opoid, FmgrInfo *opproc, bool isgt, bool iseq,
+						   Oid collation,
+						   Datum constval, Oid consttype)
+
+    */
+    res = ineq_histogram_selectivity(pnl, &vardata, 1757, &opproc, true, true, 0, constval, NUMERICOID);
 
     elog(WARNING, "<get_filter_selectivity> returning selectivity of [%lf]", res);
 
@@ -306,7 +426,7 @@ Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow
     NestLoop *nsl = (NestLoop*) end_node->plan;
 
     double filter_per_cpu_cost = 0.01;
-    int feature_relid = ((Scan *)end_node->plan)->scanrelid;
+    int feature_relid = ((Scan *)end_node->righttree->plan)->scanrelid;
     double filter_rate = get_filter_selectivity(pni, llast(nsl->join.joinqual), feature_relid);
 
     Shadow_Plan * cur_node = begin_node;
@@ -338,11 +458,13 @@ List *transfer_node_to_list(Shadow_Plan* root)
 {
     List *join_node_list = NIL;
     Shadow_Plan *cur = root;
+    elog(WARNING, "<transfer_node_to_list> begin.");
     while (IsA(cur->plan, NestLoop))
     {
         join_node_list = lappend(join_node_list, cur);
         cur = cur->lefttree;
     }
+    elog(WARNING, "<transfer_node_to_list> is ok.");
     return join_node_list;
 }
 
@@ -352,14 +474,17 @@ List *transfer_node_to_list(Shadow_Plan* root)
     [input: opt_join_node_list] 在第二步中所确定的需要插入 Filter 的节点
 */
 
-void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
+void merge_filter(Shadow_Plan *root, List *opt_join_node_list) // 注意这里的 root 不是 planner.c 里面的 root
 {
     // Prepare: join_node_list 是 root 下方所有节点作为一个 List
     List *join_node_list = transfer_node_to_list(root);
+    elog(WARNING, "<merge_filter> join_node_list = [%p]", join_node_list);
     int node_size = join_node_list->length;
     int i;
-
+    elog(WARNING, "<merge_filter> going to palloc, node_size = [%d]", node_size);
     int *flag = palloc(node_size * sizeof(int));
+
+    elog(WARNING, "<merge_filter> palloc 1 is ok.");
 
     double *conditional_filter_rate = palloc(node_size * sizeof(double));
     double *absolute_filter_rate = palloc(node_size * sizeof(double));
@@ -379,12 +504,14 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
     double cost_per_filter = 0.01;  // FIXME         
     double cost_per_join = 0.01;    // FIXME
 
+    elog(WARNING, "<merge_filter> reached checkpoint(1).");
+    memset(flag, 0, sizeof(flag));
     // 整理第二步的结果
     for (i = 0; i < node_size; i += 1)
     {
         // 如果在 opt_join_node_list 中的话, 则说明该节点上有 Filter
         // 后续 merge 需要考虑这些节点
-        if (list_member(opt_join_node_list, list_nth(join_node_list, i)))
+        if (list_member_ptr(opt_join_node_list, list_nth(join_node_list, i)))
             flag[i] = 1;    
         else
             flag[i] = -1;
@@ -405,11 +532,12 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
         push_down_rows[i] = ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows 
                                 * absolute_filter_rate[i];
     }
-
+    elog(WARNING, "<merge_filter> reached checkpoint(2).");
     // Dynamic programming part.
  
 
     // FIXME 需要考虑那些不是 Filter 的 NestLoop
+    memset(total_cost, 0, sizeof(total_cost));
     for (n = 0; n < node_size; n += 1)
     {
         cost_min = 1e20; // 设置极大值
@@ -426,16 +554,26 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
                     * absolute_filter_rate[i] / absolute_filter_rate[k];
             }
             cur_cost = total_cost[i] + sum_join_cost + filter_cost;
+            elog(WARNING, "(n, i) = [%d %d], cur_cost = [%lf] = [%lf] + [%lf] + [%lf]", n, i, cur_cost, 
+                total_cost[i], sum_join_cost, filter_cost);
             if (cur_cost < cost_min)
             {
                 cost_min = cur_cost;
                 lst_index = i;
             }
         }
-        total_cost[n] = cost_min;
+        total_cost[n] = (n > 0) ? cost_min :
+            cost_per_filter * push_down_rows[0] * absolute_filter_rate[0];
         move_from[n] = lst_index;
     }
 
+    elog(WARNING, "<merge_filter> reached checkpoint(3).");
+    elog(WARNING, "\n flag array = ");
+    for (i = 0; i < node_size; i += 1)
+    {
+        elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
+    }
+    /*
     last_ptr = node_size - 1;
     cur_ptr = move_from[last_ptr];
     while (cur_ptr != 0)
@@ -445,7 +583,8 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
         last_ptr = cur_ptr;
         cur_ptr = move_from[last_ptr];
     }
-
+    */
+    
 
     pfree(conditional_filter_rate);
     pfree(absolute_filter_rate);
@@ -463,6 +602,11 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list)
 
 double datum_to_double(Datum datum) {
 	double val = convert_numeric_to_scalar(datum, NUMERICOID, NULL);
+	return val;
+}
+
+double datum_to_int(Datum datum) {
+	double val = DatumGetInt32(datum);
 	return val;
 }
 

@@ -578,6 +578,11 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 			  Oid collation,
 			  VariableStatData *vardata, Datum constval, Oid consttype)
 {
+	// elog(WARNING, "<Entered scalarineqsel!!!>");
+	// elog(WARNING, "operator = [%d]", operator);
+	// elog(WARNING, "collation = [%d]", collation);
+	// elog(WARNING, "consttype = [%d]", consttype);
+	// elog(WARNING, "vardata->statsTuple = [%p]", vardata->statsTuple);
 	// elog(WARNING, "[Test] I am entering <scalarineqsel>");
 	Form_pg_statistic stats;
 	FmgrInfo	opproc;
@@ -594,6 +599,13 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 		 * make an estimate based on comparing the constant to the table size.
 		 */
 		
+		/*
+		bool b1 = (vardata->var) != NULL;
+		bool b2 = IsA(vardata->var, Var);
+		bool b3 = ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber;
+		elog(WARNING, "b1, b2, b3 = [%d %d %d]", b1, b2, b3);
+		*/
+
 		if ((vardata->var) != NULL && 
 			IsA(vardata->var, Var) && 
 			((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber)
@@ -670,7 +682,7 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 		// elog(WARNING, "[Test] I reached <checkpoint1> DEFAULT_INEQ_SEL = [%f]", DEFAULT_INEQ_SEL);
 		return DEFAULT_INEQ_SEL;
 	}
-	// elog(WARNING, "[Test] I reached <checkpoint2>");
+	// elog(WARNING, "[scalar] I reached <checkpoint2>");
 	stats = (Form_pg_statistic) GETSTRUCT(vardata->statsTuple);
 
 	fmgr_info(get_opcode(operator), &opproc);
@@ -750,6 +762,7 @@ mcv_selectivity(VariableStatData *vardata, FmgrInfo *opproc, Oid collation,
 						 STATISTIC_KIND_MCV, InvalidOid,
 						 ATTSTATSSLOT_VALUES | ATTSTATSSLOT_NUMBERS))
 	{
+		// elog(WARNING, "Entered here1");
 		LOCAL_FCINFO(fcinfo, 2);
 
 		/*
@@ -759,16 +772,19 @@ mcv_selectivity(VariableStatData *vardata, FmgrInfo *opproc, Oid collation,
 		 * operators that can return NULL.  A small side benefit is to not
 		 * need to re-initialize the fcinfo struct from scratch each time.
 		 */
+		// elog(WARNING, "Entered here2");
 		InitFunctionCallInfoData(*fcinfo, opproc, 2, collation,
 								 NULL, NULL);
 		fcinfo->args[0].isnull = false;
 		fcinfo->args[1].isnull = false;
 		/* be careful to apply operator right way 'round */
+		// elog(WARNING, "Entered here3");
 		if (varonleft)
 			fcinfo->args[1].value = constval;
 		else
 			fcinfo->args[0].value = constval;
 
+		// elog(WARNING, "Entered here4");
 		for (i = 0; i < sslot.nvalues; i++)
 		{
 			Datum		fresult;
@@ -829,6 +845,8 @@ histogram_selectivity(VariableStatData *vardata,
 					  int min_hist_size, int n_skip,
 					  int *hist_size)
 {
+	elog(WARNING, "<Entered histogram_selectivity!!!>");
+
 	double		result;
 	AttStatsSlot sslot;
 	/* check sanity of parameters */
@@ -932,12 +950,15 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 	 * If expression is not variable OP something or something OP variable,
 	 * then punt and return the default estimate.
 	 */
+	elog(WARNING, "<generic_restriction_selectivity> args type = [%d %d].", ((Node*)linitial(args))->type, ((Node*)lsecond(args))->type );
 	if (!get_restriction_variable(root, args, varRelid,
 								  &vardata, &other, &varonleft))
 	{
-		// elog(WARNING, "Return default: get_restriction_variable return [false].");
+		elog(WARNING, "Return default: get_restriction_variable return [false].");
 		return default_selectivity;
 	}
+	else
+		elog(WARNING, "<get_restriction_variable> is ok.");
 	/*
 	elog(WARNING, "vardata.var = [%p]", vardata.var);
 	elog(WARNING, "vardata.rel = [%p]", vardata.rel);
@@ -970,11 +991,12 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 		/*
 		 * Calculate the selectivity for the column's most common values.
 		 */
+		elog(WARNING, "<mcv_selectivity>.");
 		mcvsel = mcv_selectivity(&vardata, &opproc, collation,
 								 constval, varonleft,
 								 &mcvsum);
 
-		
+		elog(WARNING, "<mcv_selectivity> is ok.");
 		/*
 		 * If the histogram is large enough, see what fraction of it matches
 		 * the query, and assume that's representative of the non-MCV
@@ -984,6 +1006,9 @@ generic_restriction_selectivity(PlannerInfo *root, Oid oproid, Oid collation,
 		selec = histogram_selectivity(&vardata, &opproc, collation,
 									  constval, varonleft,
 									  10, 1, &hist_size);
+		
+		elog(WARNING, "<histogram_selectivity> is ok.");
+
 		if (selec < 0)
 		{
 			/* Nope, fall back on default */
@@ -1086,10 +1111,19 @@ ineq_histogram_selectivity(PlannerInfo *root,
 						 STATISTIC_KIND_HISTOGRAM, InvalidOid,
 						 ATTSTATSSLOT_VALUES))
 	{
+		elog(WARNING, "<ineq_histogram_selectivity> sslot.nvalues = [%d]", sslot.nvalues);
+		elog(WARNING, "<ineq_histogram_selectivity> sslot.stacoll = [%d]", sslot.stacoll);
+		elog(WARNING, "<ineq_histogram_selectivity> collation = [%d]", collation);
+		elog(WARNING, "<ineq_histogram_selectivity> sslot.staop = [%d]", sslot.staop);
+		elog(WARNING, "<ineq_histogram_selectivity> opoid = [%d]", opoid);
+		elog(WARNING, "<ineq_histogram_selectivity> comparison_ops_are_compatible(sslot.staop, opoid) = [%d]", 
+			comparison_ops_are_compatible(sslot.staop, opoid));
+
 		if (sslot.nvalues > 1 &&
 			sslot.stacoll == collation &&
 			comparison_ops_are_compatible(sslot.staop, opoid))
 		{
+			elog(WARNING, "ineq_histogram_selectivity reach way 1.");
 			/*
 			 * Use binary search to find the desired location, namely the
 			 * right end of the histogram bin containing the comparison value,
@@ -1362,6 +1396,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 		}
 		else if (sslot.nvalues > 1)
 		{
+			elog(WARNING, "ineq_histogram_selectivity reach way 2.");
 			/*
 			 * If we get here, we have a histogram but it's not sorted the way
 			 * we want.  Do a brute-force search to see how many of the
