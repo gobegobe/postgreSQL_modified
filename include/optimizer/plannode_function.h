@@ -46,7 +46,7 @@ void Init_LFIndex(LFIndex* lfi, Query* parse);
 
 void set_feature_contidion(LFIndex *lfi);
 
-Shadow_Plan *build_shadow_plan(Plan *curplan);
+Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *parent);
 
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
 

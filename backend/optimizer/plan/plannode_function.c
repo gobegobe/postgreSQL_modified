@@ -157,7 +157,7 @@ bool Is_feature_relid(LFIndex *lfi, int relid)
  * [return] 构建所得的影子树的根节点指针
  */
 
-Shadow_Plan *build_shadow_plan(Plan *curplan) 
+Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt) 
 {
 	// 变量定义
 	Shadow_Plan *res;
@@ -167,10 +167,12 @@ Shadow_Plan *build_shadow_plan(Plan *curplan)
 	res = makeNode(Shadow_Plan);
 	res->spliters = NULL;
 	res->plan = curplan;
+    res->filter_state = 0;
+    res->parent = prt;
 	if (curplan->lefttree) 
-		res->lefttree = build_shadow_plan(curplan->lefttree);
+		res->lefttree = build_shadow_plan(curplan->lefttree, curplan);
 	if (curplan->righttree)
-		res->righttree = build_shadow_plan(curplan->righttree);
+		res->righttree = build_shadow_plan(curplan->righttree, curplan);
 	return res;
 }
 
@@ -623,19 +625,16 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
                 elog(WARNING, "depth = %d, using op_passed_tome.\n", depth);
                 nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
             }
+            cur->filter_state = 1;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
         }
         else
             modified_op = op_passed_tome;
-        
         distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
-        
         elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
         middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
-        *subop = middle_result; 
-        
-    }
-    
+        *subop = middle_result;    
+    }  
     else if (righttree->type == T_NestLoop)
     {
         elog(WARNING, "depth = %d, entering way [2].\n", depth);
@@ -649,30 +648,27 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
                 elog(WARNING, "depth = %d, using op_passed_tome.\n", depth);
                 nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
             }
+            cur->filter_state = 1;
             modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
         }
         else
             modified_op = op_passed_tome;
 
-        
         distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
-
         elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
         middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth);
-        *subop = middle_result; 
-        
+        *subop = middle_result;    
     }
-
     else // 已经到达叶子
     { 
         elog(WARNING, "depth = %d, entering way [3].\n", depth);
         elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
         middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
-        *subop = middle_result; 
-        
+        *subop = middle_result;    
     }
-
 }
+
+
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom, int depth)

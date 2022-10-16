@@ -458,7 +458,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	if (using_feature_condition_x || using_part_infer_x)
 	{
 		if (top_plan->type == T_Agg)
-			shadow = build_shadow_plan(top_plan);
+			shadow = build_shadow_plan(top_plan, NULL);
 	}
 	
 	elog(WARNING, "check point <2>.");
@@ -475,9 +475,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		List *opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root);
 		elog(WARNING, "OK, out of <move_filter_local_optimal>");
 		elog(WARNING, "opt_list.length = [%d]", opt_list->length);
-		merge_filter(linitial(fi->shadow_roots), opt_list);
+		merge_filter(linitial(fi->shadow_roots), opt_list, lfi);
 
-		
+		elog(WARNING, "OK, out of <merge_filter>");
 	}
 	
 

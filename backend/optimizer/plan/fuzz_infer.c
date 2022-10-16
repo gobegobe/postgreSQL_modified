@@ -474,7 +474,7 @@ List *transfer_node_to_list(Shadow_Plan* root)
     [input: opt_join_node_list] 在第二步中所确定的需要插入 Filter 的节点
 */
 
-void merge_filter(Shadow_Plan *root, List *opt_join_node_list) // 注意这里的 root 不是 planner.c 里面的 root
+void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 注意这里的 root 不是 planner.c 里面的 root
 {
     // Prepare: join_node_list 是 root 下方所有节点作为一个 List
     List *join_node_list = transfer_node_to_list(root);
@@ -569,11 +569,8 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list) // 注意这里�
 
     elog(WARNING, "<merge_filter> reached checkpoint(3).");
     elog(WARNING, "\n flag array = ");
-    for (i = 0; i < node_size; i += 1)
-    {
-        elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
-    }
-    /*
+    
+    
     last_ptr = node_size - 1;
     cur_ptr = move_from[last_ptr];
     while (cur_ptr != 0)
@@ -583,8 +580,15 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list) // 注意这里�
         last_ptr = cur_ptr;
         cur_ptr = move_from[last_ptr];
     }
-    */
     
+    for (i = 0; i < node_size; i += 1)
+    {
+        elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
+    }
+    
+    // ************************** Move Filter 部分
+    move_filter_impl(root, lfi, node_size, flag);
+    elog(WARNING, "OUT of move_filter_impl");
 
     pfree(conditional_filter_rate);
     pfree(absolute_filter_rate);
@@ -594,6 +598,49 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list) // 注意这里�
     pfree(flag);
 }
 
+
+void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[])
+{
+    int count = 0;
+    Shadow_Plan *cur_node = root;
+    Shadow_Plan *end_node;
+    Shadow_Plan *filter_pos = NULL;
+    NestLoop *nsl;
+    NestLoop *nsl_to;
+
+    while (count < node_size && flag[count] != -1)
+    {
+        elog(WARNING, "count = [%d]", count);
+        if (!collect_segment(lfi, cur_node, &end_node))
+            break;
+        if (flag[count] == 1)
+            filter_pos = cur_node;
+        
+        if (cur_node == end_node)
+        {
+            // 移动Filter
+            if (filter_pos == NULL)
+            {
+                nsl = (NestLoop *) end_node->plan;
+                nsl->join.joinqual = list_delete_last(nsl->join.joinqual);
+            }
+            else if (filter_pos != end_node)
+            {
+                nsl = (NestLoop *) end_node->plan;
+                nsl_to = (NestLoop *) filter_pos->plan;
+
+                nsl_to->join.joinqual = lappend(nsl_to->join.joinqual, llast(nsl->join.joinqual));
+                nsl->join.joinqual = list_delete_last(nsl->join.joinqual);
+            }
+
+            // 移动完毕之后, 需要清空 filter_pos
+            filter_pos = NULL;
+        }
+
+        count += 1;
+        cur_node = cur_node->lefttree;
+    }
+}
 
 
 // *********************** EndOf 第三步 *******************

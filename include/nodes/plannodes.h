@@ -180,6 +180,8 @@ typedef struct Shadow_Plan {
 	Plan *plan;
 
 	List *spliters;
+	int filter_state;
+	struct Shadow_Plan *parent;
 	struct Shadow_Plan *lefttree;
 	struct Shadow_Plan *righttree;
 } Shadow_Plan;
