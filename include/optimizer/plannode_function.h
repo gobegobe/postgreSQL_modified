@@ -51,7 +51,8 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *parent);
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2);
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2,
+    List **ridlist, List **depthlist);
 
 
 double find_min_value(LFIndex *lfi, int relid);
@@ -59,7 +60,8 @@ double find_max_value(LFIndex *lfi, int relid);
 
 Const *copy_const_withdelta(Const *cur, double delta);
 
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value);
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi,
+    double *deleted_value, double current_fac, double *factor, double *leftconst);
 
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
 

@@ -38,6 +38,192 @@
 #include "optimizer/plannode_function.h"
 
 
+// ************************** 预处理部分 *******************
+
+
+void preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridlist, List *depthlist, List** filterlist)
+{
+    int i, j, temp1, temp2, r1, r2;
+    int len = ridlist->length;
+    double whatever = 0;
+    Expr *input_expr = cur_op;
+    Expr *res_expr;
+    
+    double *factorlist = palloc((len + 1) * sizeof(double));
+    double *selectivity_list = palloc((len + 1) * sizeof(double));
+    double theconst = 0.0;
+    double tempvalue;
+    double tempconst;
+
+    List *varlist = NIL;
+    Var *obj_var;
+
+    // Const *rhsnode = (Const *) lsecond(((OpExpr *) cur_op)->args);
+    double *rightconst = palloc((len + 1) * sizeof(double));
+
+    // 保证深度从小到大
+    for (i = len - 1; i >= 1; i--)
+        for (j = i - 1; j >= 0; j--)
+            if (list_nth_int(depthlist, j) > list_nth_int(depthlist, i))
+            {
+                temp1 = list_nth_int(depthlist, i);
+                temp2 = list_nth_int(depthlist, j);
+
+                r1 = list_nth_int(ridlist, i);
+                r2 = list_nth_int(ridlist, j);
+
+                lfirst_int(list_nth_cell(depthlist, i)) = temp2;
+                lfirst_int(list_nth_cell(depthlist, j)) = temp1;
+
+                lfirst_int(list_nth_cell(ridlist, i)) = r2;
+                lfirst_int(list_nth_cell(ridlist, j)) = r1;
+            }
+    
+    // 每次使用 copy_and_reserve 去除一个 relid
+    // XXX 这里假设了每个 relid 都只包含一个 feature！
+    *filterlist = lappend(*filterlist, cur_op);
+    rightconst[0] =  constvalue_to_double(((Const *) lsecond(((OpExpr *) cur_op)->args))->constvalue);
+
+    // feature1 + feature2 + feature3 < 10
+    // 根据深度排序：(feature1, feature2, feature3)
+    // 移除 feature1 ==> feature2 + featuer3 ...
+    // 移除 feature2 ==> feature3 ...
+
+
+    elog(WARNING, "<preprocess_filters>  loop begin.");
+    for (i = 0; i < len; i++)
+    {
+        res_expr = copy_and_delete_op(input_expr, list_nth_int(ridlist, i), lfi, &whatever, 1, &tempvalue, &tempconst);
+        rightconst[i + 1] = constvalue_to_double(((Const *) lsecond(((OpExpr *) res_expr)->args))->constvalue);
+
+        *filterlist = lappend(*filterlist, res_expr);
+        input_expr = res_expr;
+
+        factorlist[i] = tempvalue;
+
+        if (theconst == 0.0)
+            theconst = tempconst;
+
+        elog(WARNING, "<preprocess_filters> ridlist[%d] = [%d], factor[i] = [%.15f]", i, list_nth_int(ridlist, i), tempvalue);
+
+        collect_var_info(pni, linitial(((OpExpr *)cur_op)->args)
+            , list_nth_int(ridlist, i), &obj_var, &tempvalue, &tempconst);
+        varlist = lappend(varlist, obj_var);
+    }
+
+    elog(WARNING, "<preprocess_filters> loop is ok..");
+    elog(WARNING, "<preprocess_filters> varlist->length = [%d]", varlist->length);
+    elog(WARNING, "<preprocess_filters> varlist[0] = [%p]", list_nth(varlist, 0));
+    elog(WARNING, "<preprocess_filters> varno = [%d]", ((Var*)list_nth(varlist, 0))->varno);
+
+    // varlist:     feature1 feature2 feature3
+    // factorlist:  1.0        2.0      3.0
+    // rightconsts: 10.0          8.0     5.0
+    // feature1 + feature2 + feature2 + 1.23(theconst) < rightconst[i]
+
+    selectivity_list[0] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 0);
+    selectivity_list[1] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 1);
+    selectivity_list[2] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 2);
+    selectivity_list[3] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 3);
+
+    for (i = 0; i < len; i += 1)
+    {
+        elog(WARNING, "<preprocess_filters> selectivity_list[%d] = [%.10f]", i, selectivity_list[i]);
+    }
+
+    elog(WARNING, "<preprocess_filters> the const = [%lf]", theconst);
+    elog(WARNING, "\n<preprocess_filters> is ok, (*filterlist)->length = [%d].", (*filterlist)->length);
+}
+
+double calc_selec(PlannerInfo *pni, List *varlist, double *factorlist, int len, double leftconst, double *rightconsts, int base)
+{
+    int i, t0, t1, t2, t3;
+    VariableStatData vardata;
+    AttStatsSlot sslots[4];
+    double per_prob = 1.0;
+    double shares = 0.0;
+    double v0, v1, v2, v3;
+
+    elog(WARNING, "<preprocess_filters> ok1");
+    for (i = 0; i < len; i += 1)
+    {
+        elog(WARNING, "<preprocess_filters> ok1.1");
+        examine_variable(pni, (Node *)list_nth(varlist, i), 0, &vardata);
+        elog(WARNING, "<preprocess_filters> ok1.2");
+        get_attstatsslot(&sslots[i], vardata.statsTuple, STATISTIC_KIND_HISTOGRAM, 0, ATTSTATSSLOT_VALUES);
+        elog(WARNING, "<preprocess_filters> ok1.3");
+        per_prob = per_prob / sslots[i].nvalues;
+    }
+    elog(WARNING, "<preprocess_filters> ok2");
+    
+    if (base == 0)
+    {
+        // 应该用最大值 / 平均值
+        // 
+        for (t0 = 0; t0 < sslots[0].nvalues; t0 += 1)
+            {
+                v0 = factorlist[0] * sslots[0].values[t0];
+                for (t1 = 0; t1 < sslots[1].nvalues; t1 += 1)
+                {
+                    v1 = factorlist[1] * sslots[1].values[t1];
+                    for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
+                    {
+                        v2 = factorlist[2] * sslots[2].values[t2];
+                        for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
+                        {
+                            v3 = factorlist[3] * sslots[3].values[t3];
+                            if (v0 + v1 + v2 + v3 + leftconst >= rightconsts[0])
+                                shares += 1.0;
+                        }
+                    }
+                }
+            }
+    }
+    else if (base == 1)
+    {
+        for (t1 = 0; t1 < sslots[1].nvalues; t1 += 1)
+                {
+                    v1 = factorlist[1] * sslots[1].values[t1];
+                    for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
+                    {
+                        v2 = factorlist[2] * sslots[2].values[t2];
+                        for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
+                        {
+                            v3 = factorlist[3] * sslots[3].values[t3];
+                            if (v1 + v2 + v3 + leftconst >= rightconsts[1])
+                                shares += 1.0;
+                        }
+                    }
+                }
+    }
+    else if (base == 2)
+    {
+        for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
+            {
+                v2 = factorlist[2] * sslots[2].values[t2];
+                for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
+                {
+                    v3 = factorlist[3] * sslots[3].values[t3];
+                    if (v2 + v3 + leftconst >= rightconsts[2])
+                        shares += 1.0;
+                }
+            }
+    }
+    else if (base == 3)
+    {
+        for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
+            {
+                v3 = factorlist[3] * sslots[3].values[t3];
+                if (v3 + leftconst >= rightconsts[3])
+                    shares += 1.0;
+            }
+    }
+
+    return shares * per_prob;
+}
+
+// **************************  *******************
+
 
 double query_var_average(PlannerInfo *root, Var *var)
 {
@@ -75,7 +261,7 @@ double query_var_average(PlannerInfo *root, Var *var)
         answer = datum_to_int(sslot.values[(sz + 1) / 2]);
     else
         answer = datum_to_double(sslot.values[(sz + 1) / 2]);
-    elog(WARNING, "answer = [%lf]", answer);
+    elog(WARNING, "varno = [%d], average = [%lf]", var->varno, answer);
     return answer;
 }
 
@@ -110,14 +296,22 @@ OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
     elog(WARNING, "<copy_and_transpose> [Okay] deleted_value = [%.10f].", deleted_value);
     elog(WARNING, "<copy_and_transpose> [Okay] const_value = [%.10f].", datum_to_double(const_value->constvalue));
 
-    if (obj_ratio < 0)
-        new_value = -new_value;
 
-    // TODO 接下来应该是利用 obj_bar 和  new_value 组成一个新的 OpExpr
-    // 然后用这个 OpExpr 来获得选择率
+    copied_cur = (OpExpr *) copyObject(curop);
+    if (obj_ratio < 0)
+    {
+        // new_value = -new_value;
+        if (copied_cur->opno == 1755) // <= to >=
+            copied_cur->opno = 1757; 
+
+        else if (copied_cur->opno == 1757)  // >= to <=
+            copied_cur->opno = 1755;    
+    }
+        
+
     copied_var = (Var *) copyObject(obj_var);
     new_const = create_const_from_double(new_value);
-    copied_cur = (OpExpr *) copyObject(curop);
+    
     copied_cur->args = list_make2(copied_var, new_const);
     elog(WARNING, "<copy_and_transpose> new_const = [%lf]", new_value);
     return copied_cur;
@@ -174,7 +368,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
     switch (opcur->opno)
     {
         case 1758:   // '+' for NUMERIC
-            elog(WARNING, "<> <> Entering 1758.");
+            // elog(WARNING, "<> <> Entering 1758.");
             lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
             rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
             
@@ -186,7 +380,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
 
             if (!lresult)
             {
-                elog(WARNING, "[result 1.1]");
+                // elog(WARNING, "[result 1.1]");
                 if (IsA(lefttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) lefttree);
@@ -207,7 +401,7 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
 
             if (!rresult)
             {
-                elog(WARNING, "[result 1.2]");
+                // elog(WARNING, "[result 1.2]");
                 if (IsA(righttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) righttree);
@@ -230,44 +424,44 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
             break;
         
         case 1760:   // '*' for NUMERIC;
-            elog(WARNING, "<> <> Entering 1760.");
+            // elog(WARNING, "<> <> Entering 1760.");
             lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
             rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
 
             if (lresult)
             {
-                elog(WARNING, "[result 2.1]");
+                // elog(WARNING, "[result 2.1]");
                 sonconst = (Const *) righttree;
                 *obj_ratio = datum_to_double(sonconst->constvalue);
             }
             else if (rresult)
             {
-                elog(WARNING, "[result 2.2]");
+                // elog(WARNING, "[result 2.2]");
                 sonconst = (Const *) lefttree;
                 *obj_ratio = datum_to_double(sonconst->constvalue);
             }
             else if (IsA(lefttree, Var))
             {
-                elog(WARNING, "[result 2.3]");
+                // elog(WARNING, "[result 2.3]");
                 sonconst = (Const *) righttree;
                 *deleted_value += query_var_average(root, (Var *)lefttree) * datum_to_double(sonconst->constvalue);
             }
             else if(IsA(lefttree, FuncExpr))
             {
-                elog(WARNING, "[result 2.4]");
+                // elog(WARNING, "[result 2.4]");
                 sonconst = (Const *) righttree;
                 curvar = (Var *) linitial(((FuncExpr *)lefttree)->args);
                 *deleted_value += query_var_average(root, curvar) * datum_to_double(sonconst->constvalue);
             }
             else if (IsA(righttree, Var))
             {
-                elog(WARNING, "[result 2.5]");
+                // elog(WARNING, "[result 2.5]");
                 sonconst = (Const *) lefttree;
                 *deleted_value += query_var_average(root, (Var *)righttree) * datum_to_double(sonconst->constvalue);
             }
             else if(IsA(righttree, FuncExpr))
             {
-                elog(WARNING, "[result 2.6]");
+                // elog(WARNING, "[result 2.6]");
                 sonconst = (Const *) lefttree;
                 curvar = (Var *) linitial(((FuncExpr *)righttree)->args);
                 /*
@@ -303,7 +497,7 @@ List *move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pn
     Shadow_Plan *local_opt_node;
     List *result_list = NIL;       // empty list
     bool has_segment;
-    ListCell *lc;
+    
 
     while (IsA(begin_node->plan, NestLoop))
     {
@@ -366,6 +560,7 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
     return found_endnode;
 }
 
+
 double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_relid)
 {
     OpExpr *transed_op = copy_and_transpose(pnl, cur_op, reserve_relid);
@@ -375,44 +570,38 @@ double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_reli
     Var *cur_var = (Var *) linitial(args);
     Const *cur_const = (Const *) lsecond(args);
     Datum constval = cur_const->constvalue;
-
+    FmgrInfo opproc;
     double res;
     VariableStatData vardata;
 
     elog(WARNING, "<get_filter_selectivity> returning oproid [%d]", oproid);
     elog(WARNING, "<get_filter_selectivity> returning collation [%d]", collation);
 
-    
-    // examine_variable(root, (Node *)var, 0, &vardata);
     examine_variable(pnl, (Node *)cur_var, 0, &vardata);
-
-    /*
-    double
-    scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
-			  Oid collation,
-			  VariableStatData *vardata, Datum constval, Oid consttype)
-    */
     
-    FmgrInfo	opproc;
-    fmgr_info(get_opcode(1757), &opproc);
-
-    // res = scalarineqsel(pnl, 1757, true, true, 0, &vardata, constval, NUMERICOID);
-    /*
-    double
-    ineq_histogram_selectivity(PlannerInfo *root,
-						   VariableStatData *vardata,
-						   Oid opoid, FmgrInfo *opproc, bool isgt, bool iseq,
-						   Oid collation,
-						   Datum constval, Oid consttype)
-
-    */
-    res = ineq_histogram_selectivity(pnl, &vardata, 1757, &opproc, true, true, 0, constval, NUMERICOID);
-
+    fmgr_info(get_opcode(oproid), &opproc);
+    if (oproid == 1757)
+        res = ineq_histogram_selectivity(pnl, &vardata, oproid, &opproc, true, true, 0, constval, NUMERICOID);
+    else if (oproid == 1755)
+        res = ineq_histogram_selectivity(pnl, &vardata, oproid, &opproc, false, true, 0, constval, NUMERICOID);
+    else
+        elog(ERROR, "<get_filter_selectivity> oproid not belongs to {1755, 1757}.");
     elog(WARNING, "<get_filter_selectivity> returning selectivity of [%lf]", res);
-
     return res;
 }
 
+
+/* get_filter_selectivity
+   给定一个不等式, 现在尝试估计它的选择率
+*/
+
+/*
+double get_filter_selectivity(PlannerInfo *pnl, LFIndex *lfi, OpExpr *cur_op)
+{
+
+    
+}
+*/
 double get_join_cost(Shadow_Plan *cur_node)
 {
     double per_join_cost = 0.01;
@@ -478,13 +667,10 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
 {
     // Prepare: join_node_list 是 root 下方所有节点作为一个 List
     List *join_node_list = transfer_node_to_list(root);
-    elog(WARNING, "<merge_filter> join_node_list = [%p]", join_node_list);
+    
     int node_size = join_node_list->length;
     int i;
-    elog(WARNING, "<merge_filter> going to palloc, node_size = [%d]", node_size);
     int *flag = palloc(node_size * sizeof(int));
-
-    elog(WARNING, "<merge_filter> palloc 1 is ok.");
 
     double *conditional_filter_rate = palloc(node_size * sizeof(double));
     double *absolute_filter_rate = palloc(node_size * sizeof(double));
@@ -504,8 +690,9 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
     double cost_per_filter = 0.01;  // FIXME         
     double cost_per_join = 0.01;    // FIXME
 
+    elog(WARNING, "<merge_filter> join_node_list = [%p]", join_node_list);
     elog(WARNING, "<merge_filter> reached checkpoint(1).");
-    memset(flag, 0, sizeof(flag));
+    memset(flag, 0, node_size * sizeof(int));
     // 整理第二步的结果
     for (i = 0; i < node_size; i += 1)
     {
@@ -537,7 +724,7 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
  
 
     // FIXME 需要考虑那些不是 Filter 的 NestLoop
-    memset(total_cost, 0, sizeof(total_cost));
+    memset(total_cost, 0, node_size * sizeof(double));
     for (n = 0; n < node_size; n += 1)
     {
         cost_min = 1e20; // 设置极大值
@@ -615,7 +802,8 @@ void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]
             break;
         if (flag[count] == 1)
             filter_pos = cur_node;
-        
+        // beginnode * *(f) * * * endnode * | beginnode * * * endnode *(f)
+        // (f1 + f2) + f3 < c1                        (f1 + f2) < c2
         if (cur_node == end_node)
         {
             // 移动Filter

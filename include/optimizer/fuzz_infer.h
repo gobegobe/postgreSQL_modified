@@ -33,6 +33,12 @@
 #include "optimizer/lfindex.h"
 #include "optimizer/plannode_function.h"
 
+
+void preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridlist, List *depthlist, List** filterlist);
+
+double calc_selec(PlannerInfo *pni, List *varlist, double *factorlist, 
+    int len, double leftconst, double *rightconsts, int base);
+
 /* 在给定全局信息 PlannerInfo 的情况下, 通过直方图查询 var 这一列的平均值 */
 double query_var_average(PlannerInfo *root, Var *var);
 

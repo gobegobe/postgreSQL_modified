@@ -303,7 +303,8 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	LFIndex *lfi;
 	FilterInfo *fi;
-
+	List *opt_list;
+	
 	/*
 	 * Set up global state for this planner invocation.  This data is needed
 	 * across all levels of sub-Query that might exist in the given command,
@@ -461,18 +462,30 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			shadow = build_shadow_plan(top_plan, NULL);
 	}
 	
+	
 	elog(WARNING, "check point <2>.");
 	if (using_part_infer_x && top_plan->type == T_Agg) 
 	{
+		List *ridlist = NIL;
+		List *depthlist = NIL;
+		List *filterlist = NIL;
+
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1);
+		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1, &ridlist, &depthlist);
 		// elog(WARNING, "OK, reached <distribute_joinqual_shadow>");
 
+
+		// TODO 实际上MergeFileter的过程应该彻底一些
+		// 被合并的 Filter 不应该留下中间结果的改变
+		preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
+
+		elog(ERROR, "Test Success.");
+
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
-		List *opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root);
+		opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root);
 		elog(WARNING, "OK, out of <move_filter_local_optimal>");
 		elog(WARNING, "opt_list.length = [%d]", opt_list->length);
 		merge_filter(linitial(fi->shadow_roots), opt_list, lfi);

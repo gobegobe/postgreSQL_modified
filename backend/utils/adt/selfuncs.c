@@ -845,7 +845,7 @@ histogram_selectivity(VariableStatData *vardata,
 					  int min_hist_size, int n_skip,
 					  int *hist_size)
 {
-	elog(WARNING, "<Entered histogram_selectivity!!!>");
+	// elog(WARNING, "<Entered histogram_selectivity!!!>");
 
 	double		result;
 	AttStatsSlot sslot;
@@ -1123,7 +1123,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 			sslot.stacoll == collation &&
 			comparison_ops_are_compatible(sslot.staop, opoid))
 		{
-			elog(WARNING, "ineq_histogram_selectivity reach way 1.");
+			// elog(WARNING, "ineq_histogram_selectivity reach way 1.");
 			/*
 			 * Use binary search to find the desired location, namely the
 			 * right end of the histogram bin containing the comparison value,
@@ -1198,8 +1198,10 @@ ineq_histogram_selectivity(PlannerInfo *root,
 					hibound = probe;
 			}
 
+
 			if (lobound <= 0)
 			{
+				// elog(WARNING, "<<<ineq_histogram_selectivity>>> Entering branch1");
 				/*
 				 * Constant is below lower histogram boundary.  More
 				 * precisely, we have found that no entry in the histogram
@@ -1212,6 +1214,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 			}
 			else if (lobound >= sslot.nvalues)
 			{
+				// elog(WARNING, "<<<ineq_histogram_selectivity>>> Entering branch2");
 				/*
 				 * Inverse case: constant is above upper histogram boundary.
 				 */
@@ -1219,6 +1222,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 			}
 			else
 			{
+				// elog(WARNING, "<<<ineq_histogram_selectivity>>> Entering branch3");
 				/* We have values[i-1] <= constant <= values[i]. */
 				int			i = lobound;
 				double		eq_selec = 0;
@@ -1372,7 +1376,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 			 * estimating for ">" or ">=", flip it.
 			 */
 			hist_selec = isgt ? (1.0 - histfrac) : histfrac;
-
+			// elog(WARNING, "<<<ineq_histogram_selectivity>>> reach newpoint2, hist_selec = [%lf]", hist_selec);
 			/*
 			 * The histogram boundaries are only approximate to begin with,
 			 * and may well be out of date anyway.  Therefore, don't believe
@@ -1386,6 +1390,7 @@ ineq_histogram_selectivity(PlannerInfo *root,
 				CLAMP_PROBABILITY(hist_selec);
 			else
 			{
+				// elog(WARNING, "<<<ineq_histogram_selectivity>>> ATTENTOIN: USING cutoff!");
 				double		cutoff = 0.01 / (double) (sslot.nvalues - 1);
 
 				if (hist_selec < cutoff)
@@ -1393,10 +1398,11 @@ ineq_histogram_selectivity(PlannerInfo *root,
 				else if (hist_selec > 1.0 - cutoff)
 					hist_selec = 1.0 - cutoff;
 			}
+			// elog(WARNING, "<<<ineq_histogram_selectivity>>> reach newpoint3, hist_selec = [%lf]", hist_selec);
 		}
 		else if (sslot.nvalues > 1)
 		{
-			elog(WARNING, "ineq_histogram_selectivity reach way 2.");
+			// elog(WARNING, "ineq_histogram_selectivity reach way 2.");
 			/*
 			 * If we get here, we have a histogram but it's not sorted the way
 			 * we want.  Do a brute-force search to see how many of the

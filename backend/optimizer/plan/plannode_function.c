@@ -170,9 +170,9 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt)
     res->filter_state = 0;
     res->parent = prt;
 	if (curplan->lefttree) 
-		res->lefttree = build_shadow_plan(curplan->lefttree, curplan);
+		res->lefttree = build_shadow_plan(curplan->lefttree, res);
 	if (curplan->righttree)
-		res->righttree = build_shadow_plan(curplan->righttree, curplan);
+		res->righttree = build_shadow_plan(curplan->righttree, res);
 	return res;
 }
 
@@ -224,7 +224,8 @@ void find_sole_op(Shadow_Plan *cur, FilterInfo *fi)
  */
 
 void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2) 
+(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2,
+    List **ridlist, List **depthlist) 
 {
 
     // 当前进行了很大程度上的简化：假定计划树上的节点只有
@@ -240,7 +241,7 @@ void find_split_node
     if (nodeTag(cur_plan->plan) == T_Agg)
     {
         next_node = cur_plan->lefttree;
-        find_split_node(next_node, next_node, next_node->plan->plan_rows, lfi, depth1 + 1, depth2 + 1);
+        find_split_node(next_node, next_node, next_node->plan->plan_rows, lfi, depth1 + 1, depth2 + 1, ridlist, depthlist);
         return;
     }
 	else if (nodeTag(cur_plan->plan) == T_NestLoop) 
@@ -252,9 +253,9 @@ void find_split_node
 			next_node = cur_plan;
 		}
 		if (cur_plan->lefttree != NULL)
-			find_split_node(cur_plan->lefttree, next_node, next_minrows, lfi, depth2, depth2 + 1);
+			find_split_node(cur_plan->lefttree, next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist);
 		if (cur_plan->righttree != NULL)
-			find_split_node(cur_plan->righttree,  next_node, next_minrows, lfi, depth2, depth2 + 1);
+			find_split_node(cur_plan->righttree,  next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist);
 		return;
 	}
 
@@ -273,6 +274,9 @@ void find_split_node
     if (!is_member) return;
     elog(WARNING, "Scan spotted, relid = %d, depth1 = %d, depth2 = %d\n", relid, depth1, depth2);
     minrows_node->spliters = lappend(minrows_node->spliters, (void *)cur_plan);
+
+    *ridlist = lappend_int(*ridlist, relid);
+    *depthlist = lappend_int(*depthlist, depth2);
 }
 
 /* find_value：根据传入的条件寻找某一列的min值
@@ -316,10 +320,12 @@ double find_max_value(LFIndex *lfi, int relid) {
  */
 
 
-Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value) 
+Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value,
+    double current_fac, double *factor, double *leftconst) 
 {
     // 变量定义
     double del_value_fromnow;
+    double theconst;
     Expr *left;
     Expr *right;
     Expr *lresult;
@@ -329,6 +335,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
     OpExpr *opcur;
 
     Var *vr;
+    
     // 变量定义结束
 
     if (cur->type == T_Const) // 常量节点
@@ -345,6 +352,7 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
             else
                 (*deleted_value) += find_min_value(lfi, delete_relid);
 
+            *factor = current_fac;
             return NULL;
         }
         else
@@ -383,17 +391,23 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
         case 1755:    // '<=' for NUMERIC
         case 1757:    // '>=' for NUMERIC
             // 现在假设任何 < 号右侧都是一个常数，且 < 永远在 OpExpr 的根节点
-            linitial(res->args) = copy_and_delete_op(linitial(res->args), delete_relid, lfi, &del_value_fromnow);
+            linitial(res->args) = copy_and_delete_op(linitial(res->args), delete_relid, 
+                lfi, &del_value_fromnow, 1, factor, leftconst);
             lsecond(res->args) = copy_const_withdelta((Const*)lsecond(res->args), -del_value_fromnow);
             return (Expr *)res;
             break;
         
         case 1758:   // '+' for NUMERIC
 
+            if (left->type == T_Const)
+                *leftconst = constvalue_to_double(((Const *)left)->constvalue);
+            else if (right->type == T_Const) 
+                *leftconst = constvalue_to_double(((Const *)right)->constvalue);
+
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, lfi, &del_value_fromnow);     
+                linitial(res->args), delete_relid, lfi, &del_value_fromnow, 1, factor, leftconst);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, lfi, &del_value_fromnow);
+                lsecond(res->args), delete_relid, lfi, &del_value_fromnow, 1, factor, leftconst);
 
             (*deleted_value) += del_value_fromnow;
 
@@ -414,20 +428,23 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
         case 1760:   // '*' for NUMERIC
             // 对于 * 运算符, 暂时认为其左右节点中, 至少有一个是常数节点
 
+            if (left->type == T_Const)
+                theconst = constvalue_to_double(((Const *)left)->constvalue);
+            else if (right->type == T_Const) 
+                theconst = constvalue_to_double(((Const *)right)->constvalue);
+
             lresult = copy_and_delete_op(
-                linitial(res->args), delete_relid, lfi, &del_value_fromnow);     
+                linitial(res->args), delete_relid, lfi, &del_value_fromnow, theconst, factor, leftconst);     
             rresult = copy_and_delete_op(
-                lsecond(res->args), delete_relid, lfi, &del_value_fromnow);
+                lsecond(res->args), delete_relid, lfi, &del_value_fromnow, theconst, factor, leftconst);
             
             if (left->type == T_Const) 
             {
-                (*deleted_value) += 
-                    constvalue_to_double(((Const *)lresult)->constvalue) * del_value_fromnow;
+                (*deleted_value) += theconst * del_value_fromnow;
             } 
             else if (right->type == T_Const) 
             {
-                (*deleted_value) += 
-                    constvalue_to_double(((Const *)rresult)->constvalue) * del_value_fromnow;
+                (*deleted_value) += theconst * del_value_fromnow;
             }
 
             if (lresult == NULL || rresult == NULL)
@@ -597,7 +614,8 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
 
     double whatever;
     int delete_relid;
-    
+    double factor;
+    double leftconst;
     // 变量定义结束
 
     elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
@@ -626,7 +644,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
                 nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
             }
             cur->filter_state = 1;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
         }
         else
             modified_op = op_passed_tome;
@@ -649,7 +667,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
                 nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
             }
             cur->filter_state = 1;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
         }
         else
             modified_op = op_passed_tome;
