@@ -121,23 +121,31 @@ void preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridl
     // rightconsts: 10.0          8.0     5.0
     // feature1 + feature2 + feature2 + 1.23(theconst) < rightconst[i]
 
-    selectivity_list[0] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 0);
-    selectivity_list[1] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 1);
-    selectivity_list[2] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 2);
-    selectivity_list[3] = calc_selec(pni, varlist, factorlist, len, theconst, rightconst, 3);
+    for (i = 0; i < len; i += 1)
+    {
+        elog(WARNING, "<pf> i = [%d], ridlist[i] = [%d], factor[i] = [%.15f], rightconst[i] = [%.15f]",
+            i, list_nth_int(ridlist, i), factorlist[i], rightconst[i]);
+    }
+    
+
+    selectivity_list[0] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 0);
+    selectivity_list[1] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 1);
+    selectivity_list[2] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 2);
+    selectivity_list[3] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 3);
 
     for (i = 0; i < len; i += 1)
     {
-        elog(WARNING, "<preprocess_filters> selectivity_list[%d] = [%.10f]", i, selectivity_list[i]);
+        elog(WARNING, "<preprocess_filters> selectivity_list[%d] = [%.20f]", i, selectivity_list[i]);
     }
 
     elog(WARNING, "<preprocess_filters> the const = [%lf]", theconst);
     elog(WARNING, "\n<preprocess_filters> is ok, (*filterlist)->length = [%d].", (*filterlist)->length);
 }
 
-double calc_selec(PlannerInfo *pni, List *varlist, double *factorlist, int len, double leftconst, double *rightconsts, int base)
+double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, double *factorlist, 
+    int len, double leftconst, double *rightconsts, int base)
 {
-    int i, t0, t1, t2, t3;
+    int i, j, t0, t1, t2, t3;
     VariableStatData vardata;
     AttStatsSlot sslots[4];
     double per_prob = 1.0;
@@ -147,31 +155,56 @@ double calc_selec(PlannerInfo *pni, List *varlist, double *factorlist, int len, 
     elog(WARNING, "<preprocess_filters> ok1");
     for (i = 0; i < len; i += 1)
     {
-        elog(WARNING, "<preprocess_filters> ok1.1");
         examine_variable(pni, (Node *)list_nth(varlist, i), 0, &vardata);
-        elog(WARNING, "<preprocess_filters> ok1.2");
         get_attstatsslot(&sslots[i], vardata.statsTuple, STATISTIC_KIND_HISTOGRAM, 0, ATTSTATSSLOT_VALUES);
-        elog(WARNING, "<preprocess_filters> ok1.3");
-        per_prob = per_prob / sslots[i].nvalues;
+
+        if (i >= base)
+            per_prob = per_prob / sslots[i].nvalues;
+
+        elog(WARNING, "<>preprocess_filters> for i = [%d], sslots[i].nvalues = [%d]", i, sslots[i].nvalues);
+
     }
-    elog(WARNING, "<preprocess_filters> ok2");
+    elog(WARNING, "<preprocess_filters> ok, [per_prob] = [%.15f]", per_prob);
     
+    double **diag = palloc(4 * sizeof(double *));
+
+    for (i = 0; i < len; i += 1)
+    {
+        diag[i] = palloc(sslots[i].nvalues * sizeof(double));
+        for (j = 0; j < sslots[i].nvalues; j += 1)
+            diag[i][j] = constvalue_to_double(sslots[i].values[j]);
+    }
+        
+
     if (base == 0)
     {
         // 应该用最大值 / 平均值
         // 
         for (t0 = 0; t0 < sslots[0].nvalues; t0 += 1)
             {
-                v0 = factorlist[0] * sslots[0].values[t0];
+                v0 = (t0 < sslots[0].nvalues - 1) ? 
+                        factorlist[0] * (diag[0][t0] + diag[0][t0+1]) / 2.0:
+                        factorlist[0] * (diag[0][t0] * find_max_value(lfi, list_nth_int(ridlist, 0))) / 2.0;
+
                 for (t1 = 0; t1 < sslots[1].nvalues; t1 += 1)
                 {
-                    v1 = factorlist[1] * sslots[1].values[t1];
+                    v1 = (t1 < sslots[1].nvalues - 1) ? 
+                        factorlist[1] * (diag[1][t1] + diag[1][t1+1]) / 2.0:
+                        factorlist[1] * (diag[1][t1] * find_max_value(lfi, list_nth_int(ridlist, 1))) / 2.0;
+
                     for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
                     {
-                        v2 = factorlist[2] * sslots[2].values[t2];
+                        v2 = (t2 < sslots[2].nvalues - 1) ? 
+                            factorlist[2] * (diag[2][t2] + diag[2][t2+1]) / 2.0:
+                            factorlist[2] * (diag[2][t2] * find_max_value(lfi, list_nth_int(ridlist, 2))) / 2.0;
+
+
                         for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
                         {
-                            v3 = factorlist[3] * sslots[3].values[t3];
+                            v3 = (t3 < sslots[3].nvalues - 1) ? 
+                                factorlist[3] * (diag[3][t3] + diag[3][t3+1]) / 2.0:
+                                factorlist[3] * (diag[3][t3] * find_max_value(lfi, list_nth_int(ridlist, 3))) / 2.0;
+
                             if (v0 + v1 + v2 + v3 + leftconst >= rightconsts[0])
                                 shares += 1.0;
                         }
@@ -182,42 +215,62 @@ double calc_selec(PlannerInfo *pni, List *varlist, double *factorlist, int len, 
     else if (base == 1)
     {
         for (t1 = 0; t1 < sslots[1].nvalues; t1 += 1)
+        {
+            v1 = (t1 < sslots[1].nvalues - 1) ? 
+                        factorlist[1] * (diag[1][t1] + diag[1][t1+1]) / 2.0:
+                        factorlist[1] * (diag[1][t1] * find_max_value(lfi, list_nth_int(ridlist, 1))) / 2.0;
+
+            for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
+            {
+                v2 = (t2 < sslots[2].nvalues - 1) ? 
+                            factorlist[2] * (diag[2][t2] + diag[2][t2+1]) / 2.0:
+                            factorlist[2] * (diag[2][t2] * find_max_value(lfi, list_nth_int(ridlist, 2))) / 2.0;
+
+                for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
                 {
-                    v1 = factorlist[1] * sslots[1].values[t1];
-                    for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
-                    {
-                        v2 = factorlist[2] * sslots[2].values[t2];
-                        for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
-                        {
-                            v3 = factorlist[3] * sslots[3].values[t3];
-                            if (v1 + v2 + v3 + leftconst >= rightconsts[1])
-                                shares += 1.0;
-                        }
-                    }
+                    v3 = factorlist[3] * diag[3][t3];
+                    if (v1 + v2 + v3 + leftconst >= rightconsts[1])
+                        shares += 1.0;
                 }
+            }
+        }
     }
     else if (base == 2)
     {
         for (t2 = 0; t2 < sslots[2].nvalues; t2 += 1)
+        {
+            v2 = (t2 < sslots[2].nvalues - 1) ? 
+                            factorlist[2] * (diag[2][t2] + diag[2][t2+1]) / 2.0:
+                            factorlist[2] * (diag[2][t2] * find_max_value(lfi, list_nth_int(ridlist, 2))) / 2.0;
+
+            for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
             {
-                v2 = factorlist[2] * sslots[2].values[t2];
-                for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
-                {
-                    v3 = factorlist[3] * sslots[3].values[t3];
-                    if (v2 + v3 + leftconst >= rightconsts[2])
-                        shares += 1.0;
-                }
+                v3 = (t3 < sslots[3].nvalues - 1) ? 
+                    factorlist[3] * (diag[3][t3] + diag[3][t3+1]) / 2.0:
+                    factorlist[3] * (diag[3][t3] * find_max_value(lfi, list_nth_int(ridlist, 3))) / 2.0;
+
+                if (v2 + v3 + leftconst >= rightconsts[2])
+                    shares += 1.0;
             }
+        }
     }
     else if (base == 3)
     {
         for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
-            {
-                v3 = factorlist[3] * sslots[3].values[t3];
-                if (v3 + leftconst >= rightconsts[3])
-                    shares += 1.0;
-            }
+        {
+            v3 = (t3 < sslots[3].nvalues - 1) ? 
+                factorlist[3] * (diag[3][t3] + diag[3][t3+1]) / 2.0:
+                factorlist[3] * (diag[3][t3] * find_max_value(lfi, list_nth_int(ridlist, 3))) / 2.0;
+            if (v3 + leftconst >= rightconsts[3])
+                shares += 1.0;
+        }
     }
+
+    elog(WARNING, "base = [%d], shares = [%.2f], leftconst = [%.10f]", base, shares, leftconst);
+
+    for (i = 0; i < 4; i += 1)
+        pfree(diag[i]);
+    pfree(diag);
 
     return shares * per_prob;
 }

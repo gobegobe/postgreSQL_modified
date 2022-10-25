@@ -482,7 +482,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		// 被合并的 Filter 不应该留下中间结果的改变
 		preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
 
-		elog(ERROR, "Test Success.");
+		// elog(ERROR, "Test Success.");
 
 		distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 		opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root);
