@@ -34,7 +34,7 @@
 #include "optimizer/plannode_function.h"
 
 
-void preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridlist, List *depthlist, List** filterlist);
+double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridlist, List *depthlist, List** filterlist);
 
 double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, double *factorlist, 
     int len, double leftconst, double *rightconsts, int base);
@@ -72,7 +72,7 @@ double datum_to_int(Datum datum);
 Const *create_const_from_double(double v);
 
 // ********************** 第二步相关 *******************
-List * move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pni);
+List * move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pni, double *selectivity_list);
 
 bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_node);
 
@@ -80,7 +80,7 @@ double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_reli
 
 double get_join_cost(Shadow_Plan *cur_node);
 
-Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node);
+Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node, double selectivity);
 
 
 
