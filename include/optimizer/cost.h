@@ -71,6 +71,7 @@ extern PGDLLIMPORT int constraint_exclusion;
 
 extern PGDLLIMPORT bool using_feature_condition_x;
 extern PGDLLIMPORT bool using_part_infer_x;
+extern PGDLLIMPORT bool forbid_fuzz_optimize;
 
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,
 								  double index_pages, PlannerInfo *root);

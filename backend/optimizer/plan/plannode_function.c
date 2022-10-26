@@ -472,8 +472,8 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
  * min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  */
 
-/*
-void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
+
+void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
 
     // 变量定义(为了遵循源代码风格)
     Plan *lefttree;
@@ -485,12 +485,12 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
     OpExpr *middle_result;
     OpExpr *sub_result;
 
-    double whatever;
+    double whatever, factor, leftconst; // my fault...
     int delete_relid;
     
     // 变量定义结束
 
-    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
+    elog(WARNING, "Function<distribute_non_fuzz>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
 
     whatever = 0;
     sub_result = NULL;
@@ -513,9 +513,9 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             elog(WARNING, "depth = %d, entering way [1.1].\n", depth);
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
 
-            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
+            distribute_non_fuzz(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
             
             
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
@@ -529,10 +529,10 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             elog(WARNING, "depth = %d, entering way [1.2].\n", depth);
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever);
+            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
             
 
-            distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
+            distribute_non_fuzz(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
 
             
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
@@ -559,8 +559,9 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             elog(WARNING, "depth = %d, entering way [2.1].\n", depth);
             othertree = (Scan*) cur->plan->righttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
-            distribute_joinqual_shadow(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever, 1, &factor, &leftconst);
+            
+            distribute_non_fuzz(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
 
             
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[4].", depth);
@@ -573,8 +574,9 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
             elog(WARNING, "depth = %d, entering way [2.2].\n", depth);
             othertree = (Scan*) cur->plan->lefttree;
             delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever);
-            distribute_joinqual_shadow(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
+            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever, 1, &factor, &leftconst);
+            
+            distribute_non_fuzz(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
 
             
             elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[5].", depth);
@@ -598,7 +600,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         // else: cur 是一个 Scan 节点, do nothing
     }
 }
-*/
+
 
 void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
 

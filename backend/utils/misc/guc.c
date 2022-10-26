@@ -974,6 +974,16 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
+		{"forbid_fuzz_optimize", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using forbid_fuzz_optimize."),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&forbid_fuzz_optimize,
+		false,
+		NULL, NULL, NULL
+	},
+	{
 		{"enable_seqscan", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Enables the planner's use of sequential-scan plans."),
 			NULL,
