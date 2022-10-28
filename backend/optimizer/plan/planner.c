@@ -484,6 +484,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 		if (!forbid_fuzz_optimize)
 		{
+			// 02
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
 			distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 			opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root, selectivity_list);
@@ -497,6 +498,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		}
 		else
 		{
+			// 01
 			distribute_non_fuzz(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 		}
 		

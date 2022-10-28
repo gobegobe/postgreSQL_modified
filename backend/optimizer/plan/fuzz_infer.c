@@ -89,11 +89,14 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
     // 移除 feature1 ==> feature2 + featuer3 ...
     // 移除 feature2 ==> feature3 ...
 
-
+    
     elog(WARNING, "<preprocess_filters>  loop begin.");
     for (i = 0; i < len; i++)
     {
+        // res_expr 是完整的 Filter
         res_expr = copy_and_delete_op(input_expr, list_nth_int(ridlist, i), lfi, &whatever, 1, &tempvalue, &tempconst);
+        
+        // rightconst [array of DOUBLE] 保存右侧常数的值
         rightconst[i + 1] = constvalue_to_double(((Const *) lsecond(((OpExpr *) res_expr)->args))->constvalue);
 
         *filterlist = lappend(*filterlist, res_expr);
@@ -122,7 +125,7 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
             i, list_nth_int(ridlist, i), factorlist[i], rightconst[i]);
     }
     
-
+    // 现在开始计算选择率
     selectivity_list[0] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 0);
     selectivity_list[1] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 1);
     selectivity_list[2] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 2);
@@ -166,6 +169,8 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
     }
     elog(WARNING, "<preprocess_filters> ok, [per_prob] = [%.15f]", per_prob);
     
+    // diagram 直方图中的数值（实际上是 histogram...）
+    // diag[i][j] 是 第 i 个feature的第 j 根柱子的“最小值”
     diag = palloc(4 * sizeof(double *));
 
     for (i = 0; i < len; i += 1)
@@ -671,7 +676,6 @@ double get_join_cost(Shadow_Plan *cur_node)
 
 Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node, double selectivity)
 {
-    // int feature_relid;
     double filter_per_cpu_cost = 0.01;
     double filter_rate;
     Shadow_Plan * cur_node = begin_node;
@@ -680,16 +684,6 @@ Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow
     double opt_node_delta_cost = 0.0;
     double cur_node_delta_cost = 0.0;
     
-    /*
-    if (IsA(end_node->righttree->plan, IndexScan) || IsA(end_node->righttree->plan, SeqScan))
-        feature_relid = ((Scan *)end_node->righttree->plan)->scanrelid;
-    else if (IsA(end_node->lefttree->plan, IndexScan) || IsA(end_node->lefttree->plan, SeqScan))
-        feature_relid = ((Scan *)end_node->lefttree->plan)->scanrelid;
-    else
-        elog(ERROR, "<move_filter_toopt> unknown scanrelid!");
-    */
-    
-    // filter_rate = get_filter_selectivity(pni, llast(nsl->join.joinqual), feature_relid);
     filter_rate = selectivity;
 
     while(cur_node != end_node->lefttree && cur_node != end_node->righttree)
@@ -709,7 +703,6 @@ Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow
             break;
     }
     return opt_node;
-
 }
 
 // *********************** EndOf 第二步 *******************
@@ -787,6 +780,7 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
 
     for (int i = 0; i < node_size; i += 1)
     {
+        /*
         if (flag[i] == 1) // FIXME 这里之后补充
             conditional_filter_rate[i] = 0.5;
         else
@@ -794,7 +788,11 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
         
         absolute_filter_rate[i] = (i == 0) ? conditional_filter_rate[i]: 
             absolute_filter_rate[i-1] * conditional_filter_rate[i];
-        
+        */
+
+        // absolute_filter_rate ==> 预处理的 selectivity
+        // conditional_filter_rate[i] <== absolute_filter_rate[i], [i+1]
+
         push_down_rows[i] = ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows 
                                 * absolute_filter_rate[i];
     }
