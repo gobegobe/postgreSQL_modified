@@ -304,7 +304,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	LFIndex *lfi;
 	FilterInfo *fi;
 	List *opt_list;
-	
+	int *filter_flags;
 	/*
 	 * Set up global state for this planner invocation.  This data is needed
 	 * across all levels of sub-Query that might exist in the given command,
@@ -486,15 +486,20 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		{
 			// 02
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
+			
 			opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root, selectivity_list);
 			
 			elog(WARNING, "OK, out of <move_filter_local_optimal>");
 			elog(WARNING, "opt_list.length = [%d]", opt_list->length);
 			
-			merge_filter(linitial(fi->shadow_roots), opt_list, lfi);
+			filter_flags = merge_filter(linitial(fi->shadow_roots), opt_list, lfi, selectivity_list);
 			
 			elog(WARNING, "OK, out of <merge_filter>");
+			
+			distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), 
+				lfi, &whatever_subop, 1, filter_flags);
+
+			
 		}
 		else
 		{

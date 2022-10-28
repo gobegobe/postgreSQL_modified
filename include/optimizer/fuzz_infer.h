@@ -82,14 +82,12 @@ double get_join_cost(Shadow_Plan *cur_node);
 
 Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node, double selectivity);
 
-
-
 // ********************** 第三步相关 *******************
 
 List *transfer_node_to_list(Shadow_Plan* root);
 
-void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi);
+List *merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi);
 
-void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]);
+// void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]);
 
 #endif

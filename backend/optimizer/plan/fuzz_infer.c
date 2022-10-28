@@ -282,6 +282,10 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
 
 // **************************  *******************
 
+/* query_var_average (deprecated) 求出某一列的平均值
+    [in: PlannerInfo* root] : 计划的统计信息
+    [in: Var *var] : 需要求平均值的这一列的 Var*
+*/
 
 double query_var_average(PlannerInfo *root, Var *var)
 {
@@ -323,7 +327,9 @@ double query_var_average(PlannerInfo *root, Var *var)
     return answer;
 }
 
+/* copy_and_transpose (deprecated) : 这是在之前尝试通过统计平均值来估算选择率时, 使用的函数 */
 
+/*
 OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
 {
     Var *obj_var;
@@ -361,7 +367,6 @@ OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
         // new_value = -new_value;
         if (copied_cur->opno == 1755) // <= to >=
             copied_cur->opno = 1757; 
-
         else if (copied_cur->opno == 1757)  // >= to <=
             copied_cur->opno = 1755;    
     }
@@ -374,7 +379,17 @@ OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
     elog(WARNING, "<copy_and_transpose> new_const = [%lf]", new_value);
     return copied_cur;
 }
+*/
 
+
+/* collect_var_info 在一个表达式中收集一些信息(这个函数很可能是没有必要的, 如果代码写得更好的话...)
+    [in: PlannerInfo root] 计划信息
+    [in: Expr* cur] 当前递归阶段的节点
+    [in: int reserve_relid] 需要进行信息收集的那个列的 relid
+    [out: Var*] object_var: reserve_relid 对应的那个 Var* 
+    [out: double] object_ratio: reserve_relid 对应的列的系数
+    [out: double] deleted_value: (deprecated) 这个列所带来的被删除的值(之前使用平均数来统计)
+*/
 
 bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                     Var **obj_var, double *obj_ratio, double *deleted_value)
@@ -400,27 +415,11 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
         else
             return false;
     }
-    /*
-    else if (IsA(cur, FuncExpr))
-    {
-        curvar = (Var *) linitial(((FuncExpr *)cur)->args);
-        elog(WARNING, "[FuncExpr] [curvar->varno] = [%d]", curvar->varno);
-        if (curvar->varno == reserve_relid)
-        {
-            *obj_var = curvar;
-            return true;
-        }    
-        else
-            return false;
-    }
-    */
     else if (IsA(cur, Const))
     {
         return false;
     }
     
-
-
     opcur = (OpExpr *) cur;
     lefttree = linitial(opcur->args);
     righttree = lsecond(opcur->args);
@@ -431,31 +430,20 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
             lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
             rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
             
-
             if (lresult || rresult)
-            {
                 *obj_ratio = 1.0;
-            }
-
+            
             if (!lresult)
             {
                 if (IsA(lefttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) lefttree);
-                }
-                    
+                }  
                 if (IsA(lefttree, Const))
                 {
                     sonconst = (Const *) lefttree;
                     *deleted_value += datum_to_double(sonconst->constvalue);
                 }
-                /*
-                if (IsA(lefttree, FuncExpr))
-                {
-                    curvar = (Var *) linitial(((FuncExpr *)cur)->args);
-                    *deleted_value += query_var_average(root, curvar);
-                }
-                */
             }
 
             if (!rresult)
@@ -463,20 +451,12 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                 if (IsA(righttree, Var))
                 {
                     *deleted_value += query_var_average(root, (Var *) righttree);
-                }
-                    
+                }  
                 if (IsA(righttree, Const))
                 {
                     sonconst = (Const *) righttree;
                     *deleted_value += datum_to_double(sonconst->constvalue);
                 }
-                /*
-                if (IsA(righttree, FuncExpr))
-                {
-                    curvar = (Var *) linitial(((FuncExpr *)cur)->args);
-                    *deleted_value += query_var_average(root, curvar);
-                }
-                */
             }
             
 
@@ -502,31 +482,13 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
                 sonconst = (Const *) righttree;
                 *deleted_value += query_var_average(root, (Var *)lefttree) * datum_to_double(sonconst->constvalue);
             }
-            /*
-            else if(IsA(lefttree, FuncExpr))
-            {
-                sonconst = (Const *) righttree;
-                curvar = (Var *) linitial(((FuncExpr *)lefttree)->args);
-                *deleted_value += query_var_average(root, curvar) * datum_to_double(sonconst->constvalue);
-            }
-            */
             else if (IsA(righttree, Var))
             {
                 sonconst = (Const *) lefttree;
                 *deleted_value += query_var_average(root, (Var *)righttree) * datum_to_double(sonconst->constvalue);
             }
-            /*
-            else if(IsA(righttree, FuncExpr))
-            {
-                sonconst = (Const *) lefttree;
-                curvar = (Var *) linitial(((FuncExpr *)righttree)->args);
-                *deleted_value += query_var_average(root, curvar) * datum_to_double(sonconst->constvalue);
-            }
-            */
             else 
                 elog(WARNING, "<collect_var_info> Well, I do not know what happened.");
-
-
             break;
 
         default:
@@ -576,7 +538,7 @@ List *move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pn
 }
 
 /* collect_segment 尝试从某个点开始获取一段节点
-    [return] : 是否可以确定一个段
+    [return] -> bool: 是否可以确定一个段
     [input: begin_node] : 段的起始点
     [output: end_node] : 段的结束点
 */
@@ -594,6 +556,7 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
             scanrel = ((Scan *)cur_node->righttree->plan)->scanrelid;
             if (Is_feature_relid(lfi, scanrel))
             {
+                cur_node->is_endnode = true;
                 found_endnode = true;
                 *end_node = cur_node;
                 break;
@@ -604,12 +567,12 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
             scanrel = ((Scan *)cur_node->lefttree->plan)->scanrelid;
             if (Is_feature_relid(lfi, scanrel))
             {
+                cur_node->is_endnode = true;
                 found_endnode = true;
                 *end_node = cur_node;
                 break;
             }
         }
-
 
         if (IsA(cur_node->lefttree->plan, NestLoop))
             cur_node = cur_node->lefttree;
@@ -624,47 +587,11 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
     return found_endnode;
 }
 
-/*
-double get_filter_selectivity(PlannerInfo *pnl, OpExpr *cur_op, int reserve_relid)
-{
-    OpExpr *transed_op = copy_and_transpose(pnl, cur_op, reserve_relid);
-    int oproid = transed_op->opno;
-    int collation = transed_op->opcollid;
-    List *args = transed_op->args;
-    Var *cur_var = (Var *) linitial(args);
-    Const *cur_const = (Const *) lsecond(args);
-    Datum constval = cur_const->constvalue;
-    FmgrInfo opproc;
-    double res;
-    VariableStatData vardata;
 
-    elog(WARNING, "<get_filter_selectivity> returning oproid [%d]", oproid);
-    elog(WARNING, "<get_filter_selectivity> returning collation [%d]", collation);
-
-    examine_variable(pnl, (Node *)cur_var, 0, &vardata);
-    
-    fmgr_info(get_opcode(oproid), &opproc);
-    if (oproid == 1757)
-        res = ineq_histogram_selectivity(pnl, &vardata, oproid, &opproc, true, true, 0, constval, NUMERICOID);
-    else if (oproid == 1755)
-        res = ineq_histogram_selectivity(pnl, &vardata, oproid, &opproc, false, true, 0, constval, NUMERICOID);
-    else
-        elog(ERROR, "<get_filter_selectivity> oproid not belongs to {1755, 1757}.");
-    elog(WARNING, "<get_filter_selectivity> returning selectivity of [%lf]", res);
-    return res;
-}
-*/
-
-/* get_filter_selectivity
-   给定一个不等式, 现在尝试估计它的选择率
-*/
-
-/*
-double get_filter_selectivity(PlannerInfo *pnl, LFIndex *lfi, OpExpr *cur_op)
-{
-
-    
-}
+/* get_join_cost 
+   根据节点 cur_node 及其左右子节点上面的信息, 估算出 join 的代价
+   [return] : 当前认为的 join 的代价
+   [in: Shadow_plan* cur_node] 所考虑的节点
 */
 double get_join_cost(Shadow_Plan *cur_node)
 {
@@ -673,6 +600,7 @@ double get_join_cost(Shadow_Plan *cur_node)
     int rows2 = ((Plan*) cur_node->righttree->plan)->plan_rows;
     return per_join_cost * rows1 * rows2;
 }
+
 
 Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node, double selectivity)
 {
@@ -730,77 +658,76 @@ List *transfer_node_to_list(Shadow_Plan* root)
 }
 
 
-/* merge_filter
-    [input: root] 开始合并的根节点
-    [input: opt_join_node_list] 在第二步中所确定的需要插入 Filter 的节点
+/*  merge_filter: 这个函数执行 Filter 的合并
+    [input: Shadow_Plan* root] 开始合并的根节点
+    [input: List* opt_join_node_list] 在第二步中所确定的需要插入 Filter 的节点
+    [input: LFIndex* lfi] : 关于 feature 的信息
 */
 
-void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 注意这里的 root 不是 planner.c 里面的 root
+int *merge_filter(Shadow_Plan *root, List *opt_join_node_list, 
+    LFIndex *lfi, double *selectivity_list)
+// 注意这里的 root 不是 planner.c 里面的 root
 {
     // Prepare: join_node_list 是 root 下方所有节点作为一个 List
     List *join_node_list = transfer_node_to_list(root);
-    
     int node_size = join_node_list->length;
-    int i;
-    int *flag = palloc(node_size * sizeof(int));
 
-    double *conditional_filter_rate = palloc(node_size * sizeof(double));
-    double *absolute_filter_rate = palloc(node_size * sizeof(double));
-    double *push_down_rows = palloc(node_size * sizeof(double));
+    int i, n, k, lst_index, last_ptr, cur_ptr;
+    int segcounter = 0;
 
-    int n, k, lst_index;
     double filter_cost;
     double sum_join_cost;
     double cost_min;
     double cur_cost;
-    double *total_cost = palloc(node_size * sizeof(double));
-    int *move_from = palloc(node_size * sizeof(int));
 
-    int last_ptr;
-    int cur_ptr;
+    int     *flag = palloc(node_size * sizeof(int));
+    double  *total_cost = palloc(node_size * sizeof(double));
+    int     *move_from = palloc(node_size * sizeof(int));
+    double  *conditional_filter_rate = palloc(node_size * sizeof(double));
+    double  *absolute_filter_rate = palloc(node_size * sizeof(double));
+    double  *push_down_rows = palloc(node_size * sizeof(double));
 
-    double cost_per_filter = 0.01;  // FIXME         
-    double cost_per_join = 0.01;    // FIXME
+    const double cost_per_filter = 0.01;  // FIXME         
+    const double cost_per_join = 0.01;    // FIXME
 
     elog(WARNING, "<merge_filter> join_node_list = [%p]", join_node_list);
     elog(WARNING, "<merge_filter> reached checkpoint(1).");
-    memset(flag, 0, node_size * sizeof(int));
+
+    memset(move_from, 0, node_size * sizeof(int));
+
     // 整理第二步的结果
     for (i = 0; i < node_size; i += 1)
     {
-        // 如果在 opt_join_node_list 中的话, 则说明该节点上有 Filter
-        // 后续 merge 需要考虑这些节点
+        // 如果在 opt_join_node_list 中的话, 则说明该节点上有 Filter, 后续 merge 需要考虑这些节点
         if (list_member_ptr(opt_join_node_list, list_nth(join_node_list, i)))
             flag[i] = 1;    
         else
             flag[i] = -1;
     }
 
-    // Prepare for absolute filter rate.
+    // *********************** Prepare for absolute filter rate. ***********************
 
-    for (int i = 0; i < node_size; i += 1)
+    for (i = 0; i < node_size; i += 1)
     {
-        /*
-        if (flag[i] == 1) // FIXME 这里之后补充
-            conditional_filter_rate[i] = 0.5;
-        else
-            conditional_filter_rate[i] = 1.0; // 没有 Filter
-        
-        absolute_filter_rate[i] = (i == 0) ? conditional_filter_rate[i]: 
-            absolute_filter_rate[i-1] * conditional_filter_rate[i];
-        */
-
         // absolute_filter_rate ==> 预处理的 selectivity
         // conditional_filter_rate[i] <== absolute_filter_rate[i], [i+1]
+        absolute_filter_rate[i] = selectivity_list[segcounter];
 
-        push_down_rows[i] = ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows 
-                                * absolute_filter_rate[i];
+        if (((Shadow_Plan *) list_nth(join_node_list, i))->is_endnode) 
+            segcounter += 1;
+
+        if (i == node_size - 1)
+            conditional_filter_rate[i] = absolute_filter_rate[i];
+
+        if (i > 0)
+            conditional_filter_rate[i-1] = absolute_filter_rate[i-1] / absolute_filter_rate[i];
+
+        push_down_rows[i] = absolute_filter_rate[i] * ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows;
     }
     elog(WARNING, "<merge_filter> reached checkpoint(2).");
-    // Dynamic programming part.
+    
+    // *********************** Dynamic programming part. ***********************
  
-
-    // FIXME 需要考虑那些不是 Filter 的 NestLoop
     memset(total_cost, 0, node_size * sizeof(double));
     for (n = 0; n < node_size; n += 1)
     {
@@ -808,14 +735,11 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
         lst_index = n;
         for (i = 0; i < n; i += 1)
         {
-            filter_cost = cost_per_filter * push_down_rows[n] 
-                * absolute_filter_rate[i] / absolute_filter_rate[n];
+            filter_cost = cost_per_filter * push_down_rows[n] * absolute_filter_rate[i] / absolute_filter_rate[n];
             sum_join_cost = 0.0;
             for (k = i + 1; k <= n; k += 1)
-            {
-                // join cost
-                sum_join_cost += cost_per_join * push_down_rows[k] 
-                    * absolute_filter_rate[i] / absolute_filter_rate[k];
+            {   // join cost
+                sum_join_cost += cost_per_join * push_down_rows[k]  * absolute_filter_rate[i] / absolute_filter_rate[k];
             }
             cur_cost = total_cost[i] + sum_join_cost + filter_cost;
             elog(WARNING, "(n, i) = [%d %d], cur_cost = [%lf] = [%lf] + [%lf] + [%lf]", n, i, cur_cost, 
@@ -826,14 +750,12 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
                 lst_index = i;
             }
         }
-        total_cost[n] = (n > 0) ? cost_min :
-            cost_per_filter * push_down_rows[0] * absolute_filter_rate[0];
+        total_cost[n] = (n > 0) ? cost_min : cost_per_filter * push_down_rows[0] * absolute_filter_rate[0];
         move_from[n] = lst_index;
     }
 
     elog(WARNING, "<merge_filter> reached checkpoint(3).");
     elog(WARNING, "\n flag array = ");
-    
     
     last_ptr = node_size - 1;
     cur_ptr = move_from[last_ptr];
@@ -850,8 +772,9 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
         elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
     }
     
-    // ************************** Move Filter 部分
-    move_filter_impl(root, lfi, node_size, flag);
+    // ************************** Move Filter 部分 ***********************
+    // move_filter_impl(root, lfi, node_size, flag);
+    
     elog(WARNING, "OUT of move_filter_impl");
 
     pfree(conditional_filter_rate);
@@ -859,10 +782,11 @@ void merge_filter(Shadow_Plan *root, List *opt_join_node_list, LFIndex *lfi) // 
     pfree(push_down_rows);
     pfree(total_cost);
     pfree(move_from);
-    pfree(flag);
+    
+    return flag;
 }
 
-
+/*
 void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[])
 {
     int count = 0;
@@ -879,8 +803,7 @@ void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]
             break;
         if (flag[count] == 1)
             filter_pos = cur_node;
-        // beginnode * *(f) * * * endnode * | beginnode * * * endnode *(f)
-        // (f1 + f2) + f3 < c1                        (f1 + f2) < c2
+
         if (cur_node == end_node)
         {
             // 移动Filter
@@ -910,11 +833,11 @@ void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]
             cur_node = cur_node->righttree;
     }
 }
-
+*/
 
 // *********************** EndOf 第三步 *******************
 
-// 关于转换值和创建节点的函数
+// *********************** (Utils) 关于转换值和创建节点的函数 ***********************
 
 double datum_to_double(Datum datum) {
 	double val = convert_numeric_to_scalar(datum, NUMERICOID, NULL);

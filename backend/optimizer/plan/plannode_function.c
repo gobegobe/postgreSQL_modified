@@ -169,6 +169,8 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt)
 	res->plan = curplan;
     res->filter_state = 0;
     res->parent = prt;
+    res->is_endnode = false;
+
 	if (curplan->lefttree) 
 		res->lefttree = build_shadow_plan(curplan->lefttree, res);
 	if (curplan->righttree)
@@ -602,33 +604,27 @@ void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, O
 }
 
 
-void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
-
+void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, 
+    LFIndex *lfi, OpExpr **subop, int depth, int *filter_flags) 
+{
     // 变量定义(为了遵循源代码风格)
-    Plan *lefttree;
-    Plan *righttree;
-    Scan *othertree;
     NestLoop *nsl;
-
+    Scan *othertree;
     Expr *modified_op;
-    OpExpr *middle_result;
-    OpExpr *sub_result;
+    Plan *lefttree, *righttree;
+    OpExpr *middle_result, *sub_result;
 
-    double whatever;
     int delete_relid;
-    double factor;
-    double leftconst;
-    // 变量定义结束
+    double whatever, factor, leftconst;
+    bool emplace_filter = filter_flags[depth - 1];
 
+    // 变量定义结束
     elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
 
     whatever = 0;
     sub_result = NULL;
     lefttree = cur->plan->lefttree;
     righttree = cur->plan->righttree;
-
-    
-
     nsl = (NestLoop*) cur->plan;
     lfi->split_node_deepest = depth;
 
@@ -638,7 +634,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         othertree = (Scan*) cur->plan->righttree;
         delete_relid = othertree->scanrelid;
         
-        if (op_passed_tome != NULL && Is_feature_relid(lfi, delete_relid))
+        if (op_passed_tome != NULL && emplace_filter)
         {
             if (depth != 1)
             {
@@ -661,7 +657,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         othertree = (Scan*) cur->plan->lefttree;
         delete_relid = othertree->scanrelid;
 
-        if (op_passed_tome != NULL && depth != 1 && Is_feature_relid(lfi, delete_relid))
+        if (op_passed_tome != NULL && depth != 1 && emplace_filter)
         {
             if (depth != 1)
             {
@@ -687,8 +683,6 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex 
         *subop = middle_result;    
     }
 }
-
-
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom, int depth)
@@ -730,15 +724,6 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
         middle_result->inputcollid = 0;
         middle_result->location = -1;
         middle_result->args = list_make2(res_from_bottom, individual_scan);
-        
-        if (res_from_bottom == NULL)
-        {
-            elog(WARNING, "Shit, res_from_bottom == NULL.");
-        }
-        else if(individual_scan == NULL)
-        {
-        elog(WARNING, "Shit, individual_scan == NULL.");    
-        }
 
         if (nsl->join.joinqual != NULL && isInferFilter(llast(nsl->join.joinqual)))
         {
@@ -747,13 +732,11 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
         }
         
     }
-
     if (middle_result != NULL && depth <= lfi->split_node_deepest)
     {
         tnt = makeTargetEntry((Expr *) middle_result, i + 1, NULL, false);
         ((Plan *)nsl)->targetlist = lappend(((Plan *)nsl)->targetlist, tnt);
     }
-
     return middle_result;
 }
 

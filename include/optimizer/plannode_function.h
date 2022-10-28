@@ -63,7 +63,9 @@ Const *copy_const_withdelta(Const *cur, double delta);
 Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi,
     double *deleted_value, double current_fac, double *factor, double *leftconst);
 
-void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
+void distribute_joinqual_shadow(Shadow_Plan *cur, Expr *op_passed_tome,
+        LFIndex *lfi, OpExpr **subop, int depth, int *filter_flags);
+
 void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
