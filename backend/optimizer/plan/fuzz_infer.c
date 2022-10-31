@@ -233,7 +233,10 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
 
                 for (t3 = 0; t3 < sslots[3].nvalues; t3 += 1)
                 {
-                    v3 = factorlist[3] * diag[3][t3];
+                    v3 = (t3 < sslots[3].nvalues - 1) ? 
+                        factorlist[3] * (diag[3][t3] + diag[3][t3+1]) / 2.0:
+                        factorlist[3] * (diag[3][t3] * find_max_value(lfi, list_nth_int(ridlist, 3))) / 2.0;
+
                     if (v1 + v2 + v3 + leftconst >= rightconsts[1])
                         shares += 1.0;
                 }
@@ -276,6 +279,13 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
     for (i = 0; i < 4; i += 1)
         pfree(diag[i]);
     pfree(diag);
+
+    if (shares == 0.0) 
+    {
+        shares = 1.0;
+        elog(WARNING, "Oh nooooooooo: shares == 0!!!");
+    }
+
 
     return shares * per_prob;
 }
@@ -671,10 +681,11 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
     // Prepare: join_node_list 是 root 下方所有节点作为一个 List
     List *join_node_list = transfer_node_to_list(root);
     int node_size = join_node_list->length;
+    int part_node_size = node_size;
 
-    int i, n, k, lst_index, last_ptr, cur_ptr;
+    int i, n, k, lst_index, last_ptr;
     int segcounter = 0;
-
+    
     double filter_cost;
     double sum_join_cost;
     double cost_min;
@@ -712,7 +723,8 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
         // absolute_filter_rate ==> 预处理的 selectivity
         // conditional_filter_rate[i] <== absolute_filter_rate[i], [i+1]
         absolute_filter_rate[i] = selectivity_list[segcounter];
-
+        elog(WARNING, "i = [%d], segcounter = [%d]", i, segcounter);
+        
         if (((Shadow_Plan *) list_nth(join_node_list, i))->is_endnode) 
             segcounter += 1;
 
@@ -723,13 +735,23 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
             conditional_filter_rate[i-1] = absolute_filter_rate[i-1] / absolute_filter_rate[i];
 
         push_down_rows[i] = absolute_filter_rate[i] * ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows;
+
+        if (segcounter == lfi->feature_num)
+        {
+            part_node_size = i + 1;
+            break;
+        }
     }
-    elog(WARNING, "<merge_filter> reached checkpoint(2).");
+
+    for (i = 0; i < node_size; i += 1)
+        elog(WARNING, "i = [%d/%d], condition = [%lf], absol = [%lf]", i, node_size-1,  conditional_filter_rate[i], absolute_filter_rate[i]);
+    
+    elog(WARNING, "<merge_filter> node_size = [%d], part_node_size = [%d]\n", node_size, part_node_size);
     
     // *********************** Dynamic programming part. ***********************
  
     memset(total_cost, 0, node_size * sizeof(double));
-    for (n = 0; n < node_size; n += 1)
+    for (n = 0; n < part_node_size; n += 1)
     {
         cost_min = 1e20; // 设置极大值
         lst_index = n;
@@ -755,19 +777,19 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
     }
 
     elog(WARNING, "<merge_filter> reached checkpoint(3).");
+
+    // elog(ERROR, "\n stopped. ");
     elog(WARNING, "\n flag array = ");
     
-    last_ptr = node_size - 1;
-    cur_ptr = move_from[last_ptr];
-    while (cur_ptr != 0)
+    last_ptr = part_node_size - 1;
+    do
     {
-        for (i = cur_ptr + 1; i < last_ptr; i += 1)
+        for (i = move_from[last_ptr] + 1; i < last_ptr; i += 1)
             flag[i] = 0;
-        last_ptr = cur_ptr;
-        cur_ptr = move_from[last_ptr];
-    }
+        last_ptr = move_from[last_ptr];
+    } while (last_ptr != 0);
     
-    for (i = 0; i < node_size; i += 1)
+    for (i = 0; i < part_node_size; i += 1)
     {
         elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
     }

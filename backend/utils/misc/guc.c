@@ -984,6 +984,16 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
+		{"all_push_down", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using all_push_down."),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&all_push_down,
+		false,
+		NULL, NULL, NULL
+	},
+	{
 		{"enable_seqscan", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Enables the planner's use of sequential-scan plans."),
 			NULL,

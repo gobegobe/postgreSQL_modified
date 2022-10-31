@@ -299,12 +299,12 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	Shadow_Plan *shadow;
 	
-	OpExpr *whatever_subop;
+	
 
 	LFIndex *lfi;
 	FilterInfo *fi;
 	List *opt_list;
-	int *filter_flags;
+	
 	/*
 	 * Set up global state for this planner invocation.  This data is needed
 	 * across all levels of sub-Query that might exist in the given command,
@@ -470,6 +470,8 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		List *depthlist = NIL;
 		List *filterlist = NIL;
 		double *selectivity_list;
+		int *filter_flags;
+		OpExpr *whatever_subop;
 
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
@@ -495,9 +497,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			filter_flags = merge_filter(linitial(fi->shadow_roots), opt_list, lfi, selectivity_list);
 			
 			elog(WARNING, "OK, out of <merge_filter>");
-			
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), linitial(fi->filter_ops), 
-				lfi, &whatever_subop, 1, filter_flags);
+			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 1, 0, &whatever_subop, filter_flags, filterlist);
 
 			
 		}

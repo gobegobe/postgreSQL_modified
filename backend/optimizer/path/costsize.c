@@ -154,6 +154,7 @@ bool		enable_async_append = true;
 bool		using_feature_condition_x = false;
 bool		using_part_infer_x = false;
 bool		forbid_fuzz_optimize = false;
+bool 		all_push_down = false;
 
 typedef struct
 {
