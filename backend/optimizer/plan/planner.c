@@ -497,7 +497,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			filter_flags = merge_filter(linitial(fi->shadow_roots), opt_list, lfi, selectivity_list);
 			
 			elog(WARNING, "OK, out of <merge_filter>");
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 1, 0, &whatever_subop, filter_flags, filterlist);
+			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
 
 			
 		}

@@ -617,7 +617,6 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
     int delete_relid;
     double factor, leftconst;
     int emplace_filter = filter_flags[depth - 1];
-
     int nextsegment = segmentcounter + (cur->is_endnode ? 1 : 0);
 
     // 变量定义结束
@@ -627,7 +626,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
     lefttree = cur->plan->lefttree;
     righttree = cur->plan->righttree;
     nsl = (NestLoop*) cur->plan;
-    lfi->split_node_deepest = depth;
+    lfi->split_node_deepest = depth;    
 
     if (lefttree->type == T_NestLoop || righttree->type == T_NestLoop)
     {
@@ -637,9 +636,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
         delete_relid = othertree->scanrelid;
         
         if (all_push_down)
-        {
             emplace_filter = Is_feature_relid(lfi, othertree->scanrelid);
-        }
 
         if (emplace_filter && depth != 0)
         {
@@ -656,6 +653,18 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
     { 
         elog(WARNING, "depth = %d, entering way [3].\n", depth);
         elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
+        
+        if (all_push_down)
+        {
+            if (Is_feature_relid(lfi, ((Scan *)(lefttree))->scanrelid) || 
+                Is_feature_relid(lfi, ((Scan *)(righttree))->scanrelid))
+                emplace_filter = 1;
+        }
+        if (emplace_filter && depth != 0)
+        {
+            nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
+        }
+        
         middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
         *subop = middle_result;    
     }
@@ -674,7 +683,6 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
 
     
     // 需要处理对 delete_relid 的扫描了
-
     // 这里需要分别处理, 是因为只有在第一次的时候, 需要保留常数
     nsl = (NestLoop*) cur->plan;
     i = ((Plan *)nsl)->targetlist->length;
@@ -738,7 +746,6 @@ OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed
         nsl = (NestLoop*) cur->plan;
         i = ((Plan *)nsl)->targetlist->length;
         middle_result = linitial(( (OpExpr*)op_passed_tome)->args);
-
 
         if (depth <= lfi->split_node_deepest)
         {
