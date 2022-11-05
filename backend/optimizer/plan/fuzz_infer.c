@@ -713,7 +713,7 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
         if (list_member_ptr(opt_join_node_list, list_nth(join_node_list, i)))
             flag[i] = 1;    
         else
-            flag[i] = -1;
+            flag[i] = 0;
     }
 
     // *********************** Prepare for absolute filter rate. ***********************
