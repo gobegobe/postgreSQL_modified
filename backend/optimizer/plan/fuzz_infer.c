@@ -740,7 +740,7 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
         {
             part_node_size = i + 1;
             break;
-        }
+        } // TODO 最上面的
     }
 
     for (i = 0; i < node_size; i += 1)
