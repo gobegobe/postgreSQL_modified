@@ -603,6 +603,10 @@ void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, O
 }
 
 
+/*
+ *
+ * 
+ */
 void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi, 
     int depth, int segmentcounter,
     OpExpr **subop, int *filter_flags, List *filterlist) 

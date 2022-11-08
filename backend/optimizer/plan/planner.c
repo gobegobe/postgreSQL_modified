@@ -487,19 +487,12 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		if (!forbid_fuzz_optimize)
 		{
 			// 02
+			// linitial(List *)
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
-			
-			opt_list = move_filter_local_optimal(linitial(fi->shadow_roots), lfi, root, selectivity_list);
-			
-			elog(WARNING, "OK, out of <move_filter_local_optimal>");
-			elog(WARNING, "opt_list.length = [%d]", opt_list->length);
-			
-			filter_flags = merge_filter(linitial(fi->shadow_roots), opt_list, lfi, selectivity_list);
-			
-			elog(WARNING, "OK, out of <merge_filter>");
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
 
-			
+			filter_flags = determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list);
+
+			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
 		}
 		else
 		{
