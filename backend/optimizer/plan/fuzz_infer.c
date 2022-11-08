@@ -747,12 +747,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         for (j = seg_inner_num - 1; j >= 0; j -= 1)
         {
             cur_node = (Shadow_Plan *) list_nth(seg_inner_nodes, j);
-
             // 段内部 join 的代价
             segment_inner_base_cost[i] += get_join_cost(cur_node);
-            // 该节点 filter 的代价
-            // TODOTODOTODOTODO 没必要在这儿算
-            // segment_inner_base_cost[i] += filter_cost * cur_node->plan_rows;
         }
 
         if (i == segment_num - 1)
@@ -771,12 +767,11 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     int *best_choice_node = palloc(segment_num * sizeof(int));
 
     for (i = segment_num - 1; i >= 0; i -= 1)
-    {  
+    {
         double sum_save_join_cost = 0.0;
         double cur_node_delta_cost = 0.0;
         double opt_node_delta_cost = 1e20;
         double min_segmenti_cost = 1e20;
-        double saved_cost;
         Shadow_Plan *cur_node;
         
         seg_inner_nodes = (List *) list_nth(segment_table, i);
@@ -792,12 +787,12 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             {
                 tranfrom_k_best_choice = j;
                 opt_node_delta_cost = cur_node_delta_cost;
-                saved_cost = sum_save_join_cost;
             }
             sum_save_join_cost += (1.0 - selectivity_list[i + 1]) * get_join_cost(cur_node); 
         }
 
-        total_min_cost[i] = segment_inner_base_cost[i] - saved_cost;
+        // total_min_cost[i]: 从“最深的段”开始到第i段（包括第i段）的代价
+        total_min_cost[i] = segments_base_cost_sum[i] + opt_node_delta_cost;
         transfer_from[i] = -1;
 
         if (i == segment_num - 1)
@@ -816,21 +811,22 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
                     absolute_filter_rate[k] * (segments_base_cost_sum[i + 1] - segments_base_cost_sum[k]);
             
             /********************* 上一个 filter 来自于 k 段条件下,该段内部最好的位置 *********************/
+            // j 是该段内部正在枚举的 “放置 filter” 的节点的 index
             for (j = 0; j < seg_inner_num; j += 1)
             {
                 cur_node = (Shadow_Plan *) list_nth(seg_inner_nodes, j);
-                cur_node_delta_cost = (cur_node->plan->plan_rows) * filter_per_cpu_cost - sum_save_join_cost;
+                cur_node_delta_cost = (cur_node->plan->plan_rows * selectivity_list[k + 1]) 
+                                      * filter_per_cpu_cost - sum_save_join_cost;
                 if(cur_node_delta_cost < opt_node_delta_cost)
                 {
                     tranfrom_k_best_choice = j;
                     opt_node_delta_cost = cur_node_delta_cost;
-                    saved_cost = sum_save_join_cost;
                 }
                 // TODO TODO TODO TODO
                 trans_from_k_conditional_rate = selectivity_list[i + 1] / selectivity_list[k + 1];
                 sum_save_join_cost += (1.0 - trans_from_k_conditional_rate) * get_join_cost(cur_node); 
             }
-            tranfrom_k_total_cost += segments_base_cost_sum[i] - saved_cost;
+            tranfrom_k_total_cost += segments_base_cost_sum[i] + opt_node_delta_cost;
 
             if (tranfrom_k_total_cost < total_min_cost[i])
             {
@@ -840,13 +836,11 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             }
         }
         
-
-        
     }
 
     /********************* 求出结果 flag *********************/
     int *flag = palloc(total_node_count * sizeof(int));
-
+    memset(flag, 0, total_node_count * sizeof(int));
     // 之前是从 transfer_from[0] 作为起点
     // 需要考虑两种情况：最原始/顶部这个 nestloop, 它的右子树[是/否]是一个 scan ON feature
     // 是 ==> 可以从 transfer_from[0] 开始处理
