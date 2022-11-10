@@ -91,4 +91,9 @@ int *merge_filter(Shadow_Plan *root, List *opt_join_node_list,
 
 // void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]);
 
+
+int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list);
+
+List *get_segment_table(Shadow_Plan *root, LFIndex *lfi);
+
 #endif

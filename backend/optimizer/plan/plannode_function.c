@@ -619,7 +619,6 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
     OpExpr *middle_result, *sub_result;
 
     int delete_relid;
-    double factor, leftconst;
     int emplace_filter = filter_flags[depth - 1];
     int nextsegment = segmentcounter + (cur->is_endnode ? 1 : 0);
 

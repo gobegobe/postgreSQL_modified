@@ -610,10 +610,10 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
 
 double get_join_cost(Shadow_Plan *cur_node)
 {
-    double cpu_per_tuple = DEFAULT_CPU_TUPLE_COST + DEFAULT_CPU_OPERATOR_COST;
+    double cpu_join_cost_per_tuple = DEFAULT_CPU_TUPLE_COST + DEFAULT_CPU_OPERATOR_COST;
     int rows1 = ((Plan *) cur_node->lefttree->plan)->plan_rows;
     int rows2 = ((Plan*) cur_node->righttree->plan)->plan_rows;
-    return per_join_cost * rows1 * rows2;
+    return cpu_join_cost_per_tuple * rows1 * rows2;
 }
 
 
@@ -715,7 +715,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         srgment_table 第i项 (是List *) 会保存若干个 (Shadow_plan *)
     */
 
-    List *segment_table = get_segment_table(root);
+    List *segment_table = get_segment_table(root, lfi);
     List *seg_inner_nodes;
 
     int i, j, k;
@@ -734,6 +734,16 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     double *segments_base_cost_sum = palloc(segment_num * sizeof(double));
     // 动态规划的结果：在第 i 段必须设置 filter 的时候, 从计划树底部到这个段的最小代价和
     double *total_min_cost = palloc(segment_num * sizeof(double));
+    // transfer_from[i] : 从底部到第 i 段在取得最小总代价的时候, 它是从哪一段转移的
+    // transfer_from[i] = k, 那么说明如果 第 i 段必须要有一个 filter 的话，它的最近的一个 filter 在第 k 段
+    int *transfer_from = palloc(segment_num * sizeof(int));
+    // best_choice_node[i] : 第 i 段中最好的那个 filter 位置是 **段内部的第几个节点**
+    int *best_choice_node = palloc(segment_num * sizeof(int));
+
+    // 输出结果相关变量
+    int current_segment_id = 0;
+    int accumulate_node_count = 0;
+    int *flag = palloc(total_node_count * sizeof(int));
 
     // *********************** Step1: 计算段内部的代价 ***********************
     // index 越大, 代表段越深
@@ -760,13 +770,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     }
     // *********************** 计算段内部的代价 ***********************
 
-    // transfer_from[i] : 从底部到第 i 段在取得最小总代价的时候, 它是从哪一段转移的
-    // transfer_from[i] = k, 那么说明如果 第 i 段必须要有一个 filter 的话，它的最近的一个 filter 在第 k 段
-    int *transfer_from = palloc(segment_num * sizeof(int));
-
-    // best_choice_node[i] : 第 i 段中最好的那个 filter 位置是 **段内部的第几个节点**
-    int *best_choice_node = palloc(segment_num * sizeof(int));
-
+    
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
         const double per_feature_compute_cost = (2 * DEFAULT_CPU_OPERATOR_COST);
@@ -774,7 +778,6 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         double sum_save_join_cost = 0.0;
         double cur_node_delta_cost = 0.0;
         double opt_node_delta_cost = 1e20;
-        double min_segmenti_cost = 1e20;
         Shadow_Plan *cur_node;
         
         seg_inner_nodes = (List *) list_nth(segment_table, i);
@@ -790,7 +793,6 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             cur_node_delta_cost = (cur_node->plan->plan_rows) * filter_per_cpu_cost - sum_save_join_cost;
             if(cur_node_delta_cost < opt_node_delta_cost)
             {
-                tranfrom_k_best_choice = j;
                 opt_node_delta_cost = cur_node_delta_cost;
             }
             sum_save_join_cost += (1.0 - selectivity_list[i + 1]) * get_join_cost(cur_node); 
@@ -805,16 +807,20 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         /********************* 计算上一次使用 filter 是从哪个段完成转移 *********************/
         for (k = i + 1; k < segment_num; k += 1)
         {
+
+            int tranfrom_k_best_choice = 0;
+
+            double trans_from_k_conditional_rate = selectivity_list[i + 1] / selectivity_list[k + 1];
+            
+            double tranfrom_k_total_cost = 
+                    total_min_cost[k] + 
+                    selectivity_list[k + 1] * (segments_base_cost_sum[i + 1] - segments_base_cost_sum[k]);
+
+            double filter_per_cpu_cost = per_feature_compute_cost * (k - i);
+
             sum_save_join_cost = 0.0;
             cur_node_delta_cost = 0.0;
             opt_node_delta_cost = 1e20;
-
-            double trans_from_j_conditional_rate;
-            int tranfrom_k_best_choice;
-            double tranfrom_k_total_cost = 
-                    total_min_cost[k] + 
-                    absolute_filter_rate[k] * (segments_base_cost_sum[i + 1] - segments_base_cost_sum[k]);
-            double filter_per_cpu_cost = per_feature_compute_cost * (k - i);
 
             /********************* 上一个 filter 来自于 k 段条件下,该段内部最好的位置 *********************/
             // j 是该段内部正在枚举的 “放置 filter” 的节点的 index
@@ -829,7 +835,6 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
                     opt_node_delta_cost = cur_node_delta_cost;
                 }
                 // TODO TODO TODO TODO
-                trans_from_k_conditional_rate = selectivity_list[i + 1] / selectivity_list[k + 1];
                 sum_save_join_cost += (1.0 - trans_from_k_conditional_rate) * get_join_cost(cur_node); 
             }
             tranfrom_k_total_cost += segments_base_cost_sum[i] + opt_node_delta_cost;
@@ -845,15 +850,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     }
 
     /********************* 求出结果 flag *********************/
-    int *flag = palloc(total_node_count * sizeof(int));
+    
     memset(flag, 0, total_node_count * sizeof(int));
-    // 之前是从 transfer_from[0] 作为起点
-    // 需要考虑两种情况：最原始/顶部这个 nestloop, 它的右子树[是/否]是一个 scan ON feature
-    // 是 ==> 可以从 transfer_from[0] 开始处理
-    // 否 ==> 枚举段 i, 寻找 MIN(total_min_cost[i] + 
-    //                         absolute_filter_rate[i] * (segments_base_cost_sum[0] - segments_base_cost_sum[i]))
-    int current_segment_id = 0;
-    int accumulate_node_count = 0;
     while (true)
     {
         flag[accumulate_node_count + best_choice_node[current_segment_id]] = 1;
