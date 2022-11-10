@@ -769,7 +769,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
-        const double filter_per_cpu_cost = (segment_num - i) * (2 * DEFAULT_CPU_OPERATOR_COST);
+        const double per_feature_compute_cost = (2 * DEFAULT_CPU_OPERATOR_COST);
 
         double sum_save_join_cost = 0.0;
         double cur_node_delta_cost = 0.0;
@@ -784,6 +784,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 
         for (j = 0; j < seg_inner_num; j += 1)
         {
+            double filter_per_cpu_cost = per_feature_compute_cost * (segment_num - i);
+
             cur_node = (Shadow_Plan *) list_nth(seg_inner_nodes, j);
             cur_node_delta_cost = (cur_node->plan->plan_rows) * filter_per_cpu_cost - sum_save_join_cost;
             if(cur_node_delta_cost < opt_node_delta_cost)
@@ -812,7 +814,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             double tranfrom_k_total_cost = 
                     total_min_cost[k] + 
                     absolute_filter_rate[k] * (segments_base_cost_sum[i + 1] - segments_base_cost_sum[k]);
-            
+            double filter_per_cpu_cost = per_feature_compute_cost * (k - i);
+
             /********************* 上一个 filter 来自于 k 段条件下,该段内部最好的位置 *********************/
             // j 是该段内部正在枚举的 “放置 filter” 的节点的 index
             for (j = 0; j < seg_inner_num; j += 1)
