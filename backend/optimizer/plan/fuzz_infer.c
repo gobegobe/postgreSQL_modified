@@ -610,7 +610,7 @@ bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_no
 
 double get_join_cost(Shadow_Plan *cur_node)
 {
-    double per_join_cost = 0.01;
+    double cpu_per_tuple = DEFAULT_CPU_TUPLE_COST + DEFAULT_CPU_OPERATOR_COST;
     int rows1 = ((Plan *) cur_node->lefttree->plan)->plan_rows;
     int rows2 = ((Plan*) cur_node->righttree->plan)->plan_rows;
     return per_join_cost * rows1 * rows2;
@@ -695,6 +695,11 @@ List *get_segment_table(Shadow_Plan *root, LFIndex *lfi)
 
         if (segment_count == lfi->feature_num)
             break;
+        
+        if (IsA(cur_node->righttree->plan, NestLoop))
+            cur_node = cur_node->righttree;
+        else if (IsA(cur_node->lefttree->plan, NestLoop))
+            cur_node = cur_node->lefttree;
 
     }
     return segment_table;
@@ -705,10 +710,6 @@ List *get_segment_table(Shadow_Plan *root, LFIndex *lfi)
 /* 使用一步决定 filter 的位置 */
 int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 {
-
-    const double filter_per_cpu_cost = 0.01;
-    const double join_per_cpu_cost = 0.01;
-
     /*
         segment_table (List *) 会保存若干个 (List *)
         srgment_table 第i项 (是List *) 会保存若干个 (Shadow_plan *)
@@ -768,6 +769,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
+        const double filter_per_cpu_cost = (segment_num - i) * (2 * DEFAULT_CPU_OPERATOR_COST);
+
         double sum_save_join_cost = 0.0;
         double cur_node_delta_cost = 0.0;
         double opt_node_delta_cost = 1e20;
