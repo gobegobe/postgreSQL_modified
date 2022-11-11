@@ -678,6 +678,8 @@ List *get_segment_table(Shadow_Plan *root, LFIndex *lfi)
             if (Is_feature_relid(lfi, scanrel))
             {
                 segment_table = lappend(segment_table, current_segment_nodes);
+
+                // elog(WARNING, "segment = [%d], this segment contains [%d] nodes.", segment_count, current_segment_nodes->length);
                 current_segment_nodes = NIL;
                 segment_count += 1;
             }
@@ -688,6 +690,8 @@ List *get_segment_table(Shadow_Plan *root, LFIndex *lfi)
             if (Is_feature_relid(lfi, scanrel))
             {
                 segment_table = lappend(segment_table, current_segment_nodes);
+
+                // elog(WARNING, "segment = [%d], this segment contains [%d] nodes.", segment_count, current_segment_nodes->length);
                 current_segment_nodes = NIL;
                 segment_count += 1;
             }
@@ -743,17 +747,20 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     // 输出结果相关变量
     int current_segment_id = 0;
     int accumulate_node_count = 0;
-    int *flag = palloc(total_node_count * sizeof(int));
+    int *flag;
 
     // *********************** Step1: 计算段内部的代价 ***********************
     // index 越大, 代表段越深
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
+
         Shadow_Plan *cur_node;
 
         seg_inner_nodes = (List *) list_nth(segment_table, i);
         seg_inner_num = seg_inner_nodes->length;
         total_node_count += seg_inner_num;
+
+        elog(WARNING, "seg_inner_num[%d] = [%d]", i, seg_inner_num);
 
         for (j = seg_inner_num - 1; j >= 0; j -= 1)
         {
@@ -769,7 +776,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 
     }
     // *********************** 计算段内部的代价 ***********************
-
+    // here is ok?
     
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
@@ -849,9 +856,12 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         
     }
 
+    
     /********************* 求出结果 flag *********************/
     
+    flag = palloc(total_node_count * sizeof(int));
     memset(flag, 0, total_node_count * sizeof(int));
+    
     while (true)
     {
         flag[accumulate_node_count + best_choice_node[current_segment_id]] = 1;
@@ -865,11 +875,17 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         }
     }
 
+    
+
     pfree(segment_inner_base_cost);
     pfree(segments_base_cost_sum);
     pfree(total_min_cost);
     pfree(transfer_from);
     pfree(best_choice_node);
+
+    elog (WARNING, "flag array  = ");
+    for (i = 0; i < total_node_count; i += 1)
+        elog(WARNING, "flag[%d] = [%d]", i, flag[i]);
 
     return flag;
 }

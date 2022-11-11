@@ -649,8 +649,11 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
         distribute_joinqual_shadow(nesttree, lfi, depth + 1, nextsegment, &sub_result, filter_flags, filterlist);
 
         elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
+
+        /*
         middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, linitial(filterlist), sub_result, depth, emplace_filter);
         *subop = middle_result;    
+        */
     }
     else // 已经到达叶子
     { 
@@ -668,8 +671,10 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
             nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
         }
         
+        /*
         middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
-        *subop = middle_result;    
+        *subop = middle_result;   
+        */ 
     }
 }
 

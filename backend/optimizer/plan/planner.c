@@ -417,8 +417,8 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 
 	// (ruilin) 改动起始处
-	elog(WARNING, "Configure condition = [%d] | [%d].\n", 
-		using_feature_condition_x, using_part_infer_x);
+	elog(WARNING, "Configure condition = [%d] | [%d] | [%d] | [%d].\n", 
+		using_feature_condition_x, using_part_infer_x, forbid_fuzz_optimize, all_push_down);
 
 	if (using_feature_condition_x || using_part_infer_x)
 	{
@@ -491,8 +491,9 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
 
 			filter_flags = determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list);
-
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
+			elog(WARNING, "---determine_filter is ok---.");
+			// distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
+			elog(WARNING, "---distribute_joinqual_shadow is ok---.");
 		}
 		else
 		{
