@@ -777,7 +777,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     }
     // *********************** 计算段内部的代价 ***********************
     // here is ok?
-    
+    elog(WARNING, "checkpoint 1 is ok.");
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
         const double per_feature_compute_cost = (2 * DEFAULT_CPU_OPERATOR_COST);
@@ -786,7 +786,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         double cur_node_delta_cost = 0.0;
         double opt_node_delta_cost = 1e20;
         Shadow_Plan *cur_node;
-        
+        int no_transfer_best_choice;
+
         seg_inner_nodes = (List *) list_nth(segment_table, i);
         seg_inner_num = seg_inner_nodes->length;
 
@@ -801,13 +802,17 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             if(cur_node_delta_cost < opt_node_delta_cost)
             {
                 opt_node_delta_cost = cur_node_delta_cost;
+                no_transfer_best_choice = j;
             }
             sum_save_join_cost += (1.0 - selectivity_list[i + 1]) * get_join_cost(cur_node); 
         }
 
         // total_min_cost[i]: 从“最深的段”开始到第i段（包括第i段）的代价
         total_min_cost[i] = segments_base_cost_sum[i] + opt_node_delta_cost;
+        elog(WARNING,"i = [%d], BASIC tranfrom_k_total_cost = [%.10f]", i, total_min_cost[i]);
+        
         transfer_from[i] = -1;
+        best_choice_node[i] = no_transfer_best_choice;
 
         if (i == segment_num - 1)
             continue;
@@ -846,6 +851,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             }
             tranfrom_k_total_cost += segments_base_cost_sum[i] + opt_node_delta_cost;
 
+            elog(WARNING,"i, j, k = [%d, %d, %d], tranfrom_k_total_cost = [%.10f]", i, j, k, tranfrom_k_total_cost);
             if (tranfrom_k_total_cost < total_min_cost[i])
             {
                 total_min_cost[i] = tranfrom_k_total_cost;
@@ -855,15 +861,21 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         }
         
     }
-
+    elog(WARNING, "checkpoint 2 is ok. [total_node_count] = [%d] ", total_node_count);
     
     /********************* 求出结果 flag *********************/
     
     flag = palloc(total_node_count * sizeof(int));
     memset(flag, 0, total_node_count * sizeof(int));
     
+    elog(WARNING, "checkpoint 2.5 is ok.");
     while (true)
     {
+        elog(WARNING, "accumulate_node_count = [%d]", accumulate_node_count);
+        elog(WARNING, "current_segment_id = [%d]", current_segment_id);
+        elog(WARNING, "transfer_from[current_segment_id] = [%d]", transfer_from[current_segment_id]);
+        elog(WARNING, "best_choice_node[current_segment_id] = [%d]", best_choice_node[current_segment_id]);
+
         flag[accumulate_node_count + best_choice_node[current_segment_id]] = 1;
         if (transfer_from[current_segment_id] == -1)
             break;
@@ -875,6 +887,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         }
     }
 
+    elog(WARNING, "checkpoint 3 is ok.");
     
 
     pfree(segment_inner_base_cost);
@@ -882,7 +895,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     pfree(total_min_cost);
     pfree(transfer_from);
     pfree(best_choice_node);
-
+        
     elog (WARNING, "flag array  = ");
     for (i = 0; i < total_node_count; i += 1)
         elog(WARNING, "flag[%d] = [%d]", i, flag[i]);

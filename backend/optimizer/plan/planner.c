@@ -462,6 +462,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			shadow = build_shadow_plan(top_plan, NULL);
 	}
 	
+	static int whatever_tester = 0;
 	
 	elog(WARNING, "check point <2>.");
 	if (using_part_infer_x && top_plan->type == T_Agg) 
@@ -488,9 +489,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		{
 			// 02
 			// linitial(List *)
+			
+			
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
 
 			filter_flags = determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list);
+			
+			whatever_tester = whatever_tester + 1;
 			elog(WARNING, "---determine_filter is ok---.");
 			// distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
 			elog(WARNING, "---distribute_joinqual_shadow is ok---.");
