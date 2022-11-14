@@ -619,11 +619,11 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
     OpExpr *middle_result, *sub_result;
 
     int delete_relid;
-    int emplace_filter = filter_flags[depth - 1];
+    int emplace_filter = (segmentcounter == lfi->feature_num) ? filter_flags[depth] : 0;
     int nextsegment = segmentcounter + (cur->is_endnode ? 1 : 0);
 
     // 变量定义结束
-    elog(WARNING, "Function<distribute_joinqual_shadow>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
+    elog(WARNING, "<distribute_joinqual_shadow>, depth = [%d], filter_flags[depth] = [%d]\n", depth, filter_flags[depth]);
 
     sub_result = NULL;
     lefttree = cur->plan->lefttree;
@@ -643,6 +643,7 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
 
         if (emplace_filter && depth != 0)
         {
+            elog(WARNING, ">>>>>>>>>>>>>>>>>>>>>> Filter Placed way1\n");
             nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
         }
                     
@@ -650,10 +651,10 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
 
         elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
 
-        /*
-        middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, linitial(filterlist), sub_result, depth, emplace_filter);
-        *subop = middle_result;    
-        */
+        
+        // middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, linitial(filterlist), sub_result, depth, emplace_filter);
+        // *subop = middle_result;    
+        
     }
     else // 已经到达叶子
     { 
@@ -668,13 +669,14 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
         }
         if (emplace_filter && depth != 0)
         {
+            elog(WARNING, ">>>>>>>>>>>>>>>>>>>>>> Filter Placed way2\n");
             nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
         }
         
-        /*
-        middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
-        *subop = middle_result;   
-        */ 
+        
+        // middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
+        // *subop = middle_result;   
+         
     }
 }
 

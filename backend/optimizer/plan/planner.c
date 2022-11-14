@@ -461,9 +461,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		if (top_plan->type == T_Agg)
 			shadow = build_shadow_plan(top_plan, NULL);
 	}
-	
-	static int whatever_tester = 0;
-	
+		
 	elog(WARNING, "check point <2>.");
 	if (using_part_infer_x && top_plan->type == T_Agg) 
 	{
@@ -479,30 +477,22 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
 		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1, &ridlist, &depthlist);
-		// elog(WARNING, "OK, reached <distribute_joinqual_shadow>");
 
-
-		// TODO 实际上MergeFileter的过程应该彻底一些
-		// 被合并的 Filter 不应该留下中间结果的改变
-
-		if (!forbid_fuzz_optimize)
+		if (!forbid_fuzz_optimize) // 02
 		{
-			// 02
-			// linitial(List *)
 			
 			
 			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
 
 			filter_flags = determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list);
 			
-			whatever_tester = whatever_tester + 1;
 			elog(WARNING, "---determine_filter is ok---.");
-			// distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
+			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
 			elog(WARNING, "---distribute_joinqual_shadow is ok---.");
 		}
-		else
+		else // 01
 		{
-			// 01
+			
 			distribute_non_fuzz(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
 		}
 		

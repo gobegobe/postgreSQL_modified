@@ -89,8 +89,6 @@ List *transfer_node_to_list(Shadow_Plan* root);
 int *merge_filter(Shadow_Plan *root, List *opt_join_node_list, 
     LFIndex *lfi, double *selectivity_list);
 
-// void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[]);
-
 
 int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list);
 
