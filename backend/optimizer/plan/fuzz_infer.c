@@ -126,9 +126,18 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
     }
     
     // 现在开始计算选择率
+    // selectivity_list[] 的定义如下: 
+    
+    // selectivity_list[0] 表示共同考虑第 0, 1, 2, 3 个 feature 的选择率 (此时是一个完整的 filter)
     selectivity_list[0] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 0);
+
+    // selectivity_list[1] 表示共同考虑第 1, 2, 3 个 feature 的选择率 (处理掉了第一个 feature)
     selectivity_list[1] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 1);
+
+    // selectivity_list[2] 表示共同考虑第 2, 3 个 feature 的选择率 (处理掉了 2 个 feature)
     selectivity_list[2] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 2);
+
+    // selectivity_list[0] 表示只考虑第 3 个 feature 的选择率 (处理掉了 3 个 feature, 只剩下一个 feature)
     selectivity_list[3] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 3);
 
     for (i = 0; i < len; i += 1)
@@ -292,105 +301,6 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
 
 // **************************  *******************
 
-/* query_var_average (deprecated) 求出某一列的平均值
-    [in: PlannerInfo* root] : 计划的统计信息
-    [in: Var *var] : 需要求平均值的这一列的 Var*
-*/
-
-double query_var_average(PlannerInfo *root, Var *var)
-{
-    int sz;
-    VariableStatData vardata;
-	AttStatsSlot sslot;
-    double answer;
-
-    if (!IsA(var, Var))
-    {
-        elog(WARNING, "<query_var_average> TYPE_ERROR: arg->type = [%d], T_Var = [%d]", ((Node*)var)->type, T_Var);
-        return 0.0;
-    }
-    else
-    {
-        elog(WARNING, "<query_var_average> querying for a Var..., varno = [%d]", var->varno);
-    }
-    
-
-    examine_variable(root, (Node *)var, 0, &vardata);
-    elog(WARNING, "<examine_variable> is ok.");
-    get_attstatsslot(&sslot, vardata.statsTuple, STATISTIC_KIND_HISTOGRAM,
-			0, ATTSTATSSLOT_VALUES);
-    elog(WARNING, "<get_attstatsslot> is ok.");
-    sz = sslot.nvalues;
-    elog(WARNING, "[sslot.nvalues] = [%d]", sz);
-    if (sz == 0)
-    {
-        elog(WARNING, "<query_var_average> size == 0, returnning 0.0");
-        return 0.0;
-    }
-    
-    // FIXME: only for JOB
-    if (var->vartype == INT4OID)
-        answer = datum_to_int(sslot.values[(sz + 1) / 2]);
-    else
-        answer = datum_to_double(sslot.values[(sz + 1) / 2]);
-    elog(WARNING, "varno = [%d], average = [%lf]", var->varno, answer);
-    return answer;
-}
-
-/* copy_and_transpose (deprecated) : 这是在之前尝试通过统计平均值来估算选择率时, 使用的函数 */
-
-/*
-OpExpr *copy_and_transpose(PlannerInfo *root, OpExpr *curop, int reserve_relid)
-{
-    Var *obj_var;
-    Var *copied_var;
-    double obj_ratio = 0.0;
-    double deleted_value;
-    double new_value;
-    OpExpr *copied_cur;
-    OpExpr *agri_expr = (OpExpr *) linitial(curop->args);
-    Const *const_value = (Const *) lsecond(curop->args);
-    Const *new_const;
-
-
-    elog(WARNING, "<copy_and_transpose> reserve_relid = [%d].", reserve_relid);
-    collect_var_info(root, (Expr *)agri_expr, reserve_relid, &obj_var, &obj_ratio, &deleted_value);
-
-
-
-    if ((obj_ratio < 0 ? -obj_ratio : obj_ratio) < 1e-15)
-    {
-        elog(ERROR, "<copy_and_transpose> [Fail] obj_ratio = [%.20f].", obj_ratio);
-    }
-
-    elog(WARNING, "<copy_and_transpose> [Okay] obj_ratio = [%.20f].", obj_ratio);
-    new_value = (datum_to_double(const_value->constvalue) - deleted_value) / obj_ratio;
-
-
-    elog(WARNING, "<copy_and_transpose> [Okay] deleted_value = [%.10f].", deleted_value);
-    elog(WARNING, "<copy_and_transpose> [Okay] const_value = [%.10f].", datum_to_double(const_value->constvalue));
-
-
-    copied_cur = (OpExpr *) copyObject(curop);
-    if (obj_ratio < 0)
-    {
-        // new_value = -new_value;
-        if (copied_cur->opno == 1755) // <= to >=
-            copied_cur->opno = 1757; 
-        else if (copied_cur->opno == 1757)  // >= to <=
-            copied_cur->opno = 1755;    
-    }
-        
-
-    copied_var = (Var *) copyObject(obj_var);
-    new_const = create_const_from_double(new_value);
-    
-    copied_cur->args = list_make2(copied_var, new_const);
-    elog(WARNING, "<copy_and_transpose> new_const = [%lf]", new_value);
-    return copied_cur;
-}
-*/
-
 
 /* collect_var_info 在一个表达式中收集一些信息(这个函数很可能是没有必要的, 如果代码写得更好的话...)
     [in: PlannerInfo root] 计划信息
@@ -509,97 +419,6 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
 }
 
 
-// *********************** 关于第二步的实现 *******************
-
-/* 第二步的入口：将 root 为根的子树中的 Filter 移动到最好的位置 */
-/*
-List *move_filter_local_optimal(Shadow_Plan *root, LFIndex *lfi, PlannerInfo *pni, double *selectivity_list)
-{
-    Shadow_Plan *begin_node = root;
-    Shadow_Plan *end_node;
-    Shadow_Plan *local_opt_node;
-    List *result_list = NIL;       // empty list
-    bool has_segment;
-    int selectivity_index = 0;
-    
-    while (IsA(begin_node->plan, NestLoop))
-    {
-        has_segment = collect_segment(lfi, begin_node, &end_node);
-        if (!has_segment)
-            break;
-        else
-        {
-            elog(WARNING, "Using [move_filter_toopt]!\n");
-            local_opt_node = move_filter_toopt(pni, begin_node, end_node, selectivity_list[selectivity_index]);
-            result_list = lappend(result_list, local_opt_node);
-
-            elog(WARNING, "Outof [move_filter_toopt]!\n");
-            if (IsA(end_node->lefttree->plan, NestLoop))
-                begin_node = end_node->lefttree;
-            else if (IsA(end_node->righttree->plan, NestLoop))
-                begin_node = end_node->righttree;
-            else
-                break;
-            
-            selectivity_index += 1;
-        }
-    }
-
-    return result_list;
-}
-*/
-
-/* collect_segment 尝试从某个点开始获取一段节点
-    [return] -> bool: 是否可以确定一个段
-    [input: begin_node] : 段的起始点
-    [output: end_node] : 段的结束点
-*/
-
-/*
-bool collect_segment(LFIndex *lfi, Shadow_Plan *begin_node, Shadow_Plan **end_node)
-{
-    bool found_endnode = false;
-    Shadow_Plan *cur_node = begin_node;
-    int scanrel;
-
-    while (!found_endnode)
-    {
-        if (IsA(cur_node->righttree->plan, SeqScan) || IsA(cur_node->righttree->plan, IndexScan))
-        {
-            scanrel = ((Scan *)cur_node->righttree->plan)->scanrelid;
-            if (Is_feature_relid(lfi, scanrel))
-            {
-                cur_node->is_endnode = true;
-                found_endnode = true;
-                *end_node = cur_node;
-                break;
-            }
-        }
-        else if (IsA(cur_node->lefttree->plan, SeqScan) || IsA(cur_node->lefttree->plan, IndexScan))
-        {
-            scanrel = ((Scan *)cur_node->lefttree->plan)->scanrelid;
-            if (Is_feature_relid(lfi, scanrel))
-            {
-                cur_node->is_endnode = true;
-                found_endnode = true;
-                *end_node = cur_node;
-                break;
-            }
-        }
-
-        if (IsA(cur_node->lefttree->plan, NestLoop))
-            cur_node = cur_node->lefttree;
-        else if (IsA(cur_node->righttree->plan, NestLoop))
-            cur_node = cur_node->righttree;
-        else
-        {
-            found_endnode = false;
-            break;
-        }
-    }
-    return found_endnode;
-}
-*/
 
 /* get_join_cost 
    根据节点 cur_node 及其左右子节点上面的信息, 估算出 join 的代价
@@ -615,44 +434,6 @@ double get_join_cost(Shadow_Plan *cur_node)
     int rows2 = ((Plan*) cur_node->righttree->plan)->plan_rows;
     return cpu_join_cost_per_tuple * rows1 * rows2;
 }
-
-
-/*
-Shadow_Plan *move_filter_toopt(PlannerInfo *pni, Shadow_Plan *begin_node, Shadow_Plan *end_node, double selectivity)
-{
-    double filter_per_cpu_cost = 0.01;
-    double filter_rate;
-    Shadow_Plan * cur_node = begin_node;
-    Shadow_Plan * opt_node = cur_node;
-    double sum_save_join_cost = 0.0;
-    double opt_node_delta_cost = 0.0;
-    double cur_node_delta_cost = 0.0;
-    
-    filter_rate = selectivity;
-
-    while(cur_node != end_node->lefttree && cur_node != end_node->righttree)
-    {
-        cur_node_delta_cost = (cur_node->plan->plan_rows) * filter_per_cpu_cost - sum_save_join_cost;
-        if(cur_node_delta_cost < opt_node_delta_cost)
-        {
-            opt_node = cur_node;
-            opt_node_delta_cost = cur_node_delta_cost;
-        }
-        sum_save_join_cost += (1.0 - filter_rate) * get_join_cost(cur_node); 
-        if (IsA(cur_node->lefttree->plan, NestLoop))
-            cur_node = cur_node->lefttree;
-        else if (IsA(cur_node->righttree->plan, NestLoop))
-            cur_node = cur_node->righttree;
-        else
-            break;
-    }
-    return opt_node;
-}
-
-*/
-
-// *********************** EndOf 第二步 *******************
-
 
 
 /* get_segment_table
@@ -851,7 +632,8 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
             }
             tranfrom_k_total_cost += segments_base_cost_sum[i] + opt_node_delta_cost;
 
-            elog(WARNING,"i, j, k = [%d, %d, %d], tranfrom_k_total_cost = [%.10f]", i, j, k, tranfrom_k_total_cost);
+            elog(WARNING,"i, k, best_choice(j) = [%d, %d, %d], tranfrom_k_total_cost = [%.10f]", 
+                i, k, tranfrom_k_best_choice, tranfrom_k_total_cost);
             if (tranfrom_k_total_cost < total_min_cost[i])
             {
                 total_min_cost[i] = tranfrom_k_total_cost;
@@ -903,221 +685,6 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     return flag;
 }
 
-
-
-// *********************** 关于第三步的实现 *******************
-
-List *transfer_node_to_list(Shadow_Plan* root)
-{
-    List *join_node_list = NIL;
-    Shadow_Plan *cur = root;
-    elog(WARNING, "<transfer_node_to_list> begin.");
-    while (IsA(cur->plan, NestLoop))
-    {
-        join_node_list = lappend(join_node_list, cur);
-
-        if (IsA(cur->lefttree->plan, NestLoop))
-            cur = cur->lefttree;
-        else if (IsA(cur->righttree->plan, NestLoop))
-            cur = cur->righttree;
-        else
-            break;
-    }
-    elog(WARNING, "<transfer_node_to_list> is ok.");
-    return join_node_list;
-}
-
-
-/*  merge_filter: 这个函数执行 Filter 的合并
-    [input: Shadow_Plan* root] 开始合并的根节点
-    [input: List* opt_join_node_list] 在第二步中所确定的需要插入 Filter 的节点
-    [input: LFIndex* lfi] : 关于 feature 的信息
-*/
-
-int *merge_filter(Shadow_Plan *root, List *opt_join_node_list, 
-    LFIndex *lfi, double *selectivity_list)
-// 注意这里的 root 不是 planner.c 里面的 root
-{
-    // Prepare: join_node_list 是 root 下方所有节点作为一个 List
-    List *join_node_list = transfer_node_to_list(root);
-    int node_size = join_node_list->length;
-    int part_node_size = node_size;
-
-    int i, n, k, lst_index, last_ptr;
-    int segcounter = 0;
-    
-    double filter_cost;
-    double sum_join_cost;
-    double cost_min;
-    double cur_cost;
-
-    int     *flag = palloc(node_size * sizeof(int));
-    double  *total_cost = palloc(node_size * sizeof(double));
-    int     *move_from = palloc(node_size * sizeof(int));
-    double  *conditional_filter_rate = palloc(node_size * sizeof(double));
-    double  *absolute_filter_rate = palloc(node_size * sizeof(double));
-    double  *push_down_rows = palloc(node_size * sizeof(double));
-
-    const double cost_per_filter = 0.01;  // FIXME         
-    const double cost_per_join = 0.01;    // FIXME
-
-    elog(WARNING, "<merge_filter> join_node_list = [%p]", join_node_list);
-    elog(WARNING, "<merge_filter> reached checkpoint(1).");
-
-    memset(move_from, 0, node_size * sizeof(int));
-
-    // 整理第二步的结果
-    for (i = 0; i < node_size; i += 1)
-    {
-        // 如果在 opt_join_node_list 中的话, 则说明该节点上有 Filter, 后续 merge 需要考虑这些节点
-        if (list_member_ptr(opt_join_node_list, list_nth(join_node_list, i)))
-            flag[i] = 1;    
-        else
-            flag[i] = 0;
-    }
-
-    // *********************** Prepare for absolute filter rate. ***********************
-
-    for (i = 0; i < node_size; i += 1)
-    {
-        // absolute_filter_rate ==> 预处理的 selectivity
-        // conditional_filter_rate[i] <== absolute_filter_rate[i], [i+1]
-        absolute_filter_rate[i] = selectivity_list[segcounter];
-        elog(WARNING, "i = [%d], segcounter = [%d]", i, segcounter);
-        
-        if (((Shadow_Plan *) list_nth(join_node_list, i))->is_endnode) 
-            segcounter += 1;
-
-        if (i == node_size - 1)
-            conditional_filter_rate[i] = absolute_filter_rate[i];
-
-        if (i > 0)
-            conditional_filter_rate[i-1] = absolute_filter_rate[i-1] / absolute_filter_rate[i];
-
-        push_down_rows[i] = absolute_filter_rate[i] * ((Shadow_Plan *)list_nth(join_node_list, i))->plan->plan_rows;
-
-        if (segcounter == lfi->feature_num)
-        {
-            part_node_size = i + 1;
-            break;
-        } // TODO 最上面的
-    }
-
-    for (i = 0; i < node_size; i += 1)
-        elog(WARNING, "i = [%d/%d], condition = [%lf], absol = [%lf]", i, node_size-1,  conditional_filter_rate[i], absolute_filter_rate[i]);
-    
-    elog(WARNING, "<merge_filter> node_size = [%d], part_node_size = [%d]\n", node_size, part_node_size);
-    
-    // *********************** Dynamic programming part. ***********************
- 
-    memset(total_cost, 0, node_size * sizeof(double));
-    for (n = 0; n < part_node_size; n += 1)
-    {
-        cost_min = 1e20; // 设置极大值
-        lst_index = n;
-        for (i = 0; i < n; i += 1)
-        {
-            filter_cost = cost_per_filter * push_down_rows[n] * absolute_filter_rate[i] / absolute_filter_rate[n];
-            sum_join_cost = 0.0;
-            for (k = i + 1; k <= n; k += 1)
-            {   // join cost
-                sum_join_cost += cost_per_join * push_down_rows[k]  * absolute_filter_rate[i] / absolute_filter_rate[k];
-            }
-            cur_cost = total_cost[i] + sum_join_cost + filter_cost;
-            elog(WARNING, "(n, i) = [%d %d], cur_cost = [%lf] = [%lf] + [%lf] + [%lf]", n, i, cur_cost, 
-                total_cost[i], sum_join_cost, filter_cost);
-            if (cur_cost < cost_min)
-            {
-                cost_min = cur_cost;
-                lst_index = i;
-            }
-        }
-        total_cost[n] = (n > 0) ? cost_min : cost_per_filter * push_down_rows[0] * absolute_filter_rate[0];
-        move_from[n] = lst_index;
-    }
-
-    elog(WARNING, "<merge_filter> reached checkpoint(3).");
-
-    // elog(ERROR, "\n stopped. ");
-    elog(WARNING, "\n flag array = ");
-    
-    last_ptr = part_node_size - 1;
-    do
-    {
-        for (i = move_from[last_ptr] + 1; i < last_ptr; i += 1)
-            flag[i] = 0;
-        last_ptr = move_from[last_ptr];
-    } while (last_ptr != 0);
-    
-    for (i = 0; i < part_node_size; i += 1)
-    {
-        elog(WARNING, "i = [%d], flag[i] = [%d], move_from[i] = [%d]", i, flag[i], move_from[i]);
-    }
-    
-    // ************************** Move Filter 部分 ***********************
-    // move_filter_impl(root, lfi, node_size, flag);
-    
-    elog(WARNING, "OUT of move_filter_impl");
-
-    pfree(conditional_filter_rate);
-    pfree(absolute_filter_rate);
-    pfree(push_down_rows);
-    pfree(total_cost);
-    pfree(move_from);
-    
-    return flag;
-}
-
-/*
-void move_filter_impl(Shadow_Plan *root, LFIndex *lfi, int node_size, int flag[])
-{
-    int count = 0;
-    Shadow_Plan *cur_node = root;
-    Shadow_Plan *end_node;
-    Shadow_Plan *filter_pos = NULL;
-    NestLoop *nsl;
-    NestLoop *nsl_to;
-
-    while (count < node_size && flag[count] != -1)
-    {
-        elog(WARNING, "count = [%d]", count);
-        if (!collect_segment(lfi, cur_node, &end_node))
-            break;
-        if (flag[count] == 1)
-            filter_pos = cur_node;
-
-        if (cur_node == end_node)
-        {
-            // 移动Filter
-            if (filter_pos == NULL)
-            {
-                nsl = (NestLoop *) end_node->plan;
-                nsl->join.joinqual = list_delete_last(nsl->join.joinqual);
-            }
-            else if (filter_pos != end_node)
-            {
-                nsl = (NestLoop *) end_node->plan;
-                nsl_to = (NestLoop *) filter_pos->plan;
-
-                nsl_to->join.joinqual = lappend(nsl_to->join.joinqual, llast(nsl->join.joinqual));
-                nsl->join.joinqual = list_delete_last(nsl->join.joinqual);
-            }
-
-            // 移动完毕之后, 需要清空 filter_pos
-            filter_pos = NULL;
-        }
-
-        count += 1;
-
-        if (IsA(cur_node->lefttree->plan, NestLoop))
-            cur_node = cur_node->lefttree;
-        else if (IsA(cur_node->righttree->plan, NestLoop))
-            cur_node = cur_node->righttree;
-    }
-}
-*/
-
-// *********************** EndOf 第三步 *******************
 
 // *********************** (Utils) 关于转换值和创建节点的函数 ***********************
 
