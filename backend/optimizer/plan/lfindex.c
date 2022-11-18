@@ -35,48 +35,22 @@
 #include "parser/parse_coerce.h"
 #include "parser/parse_node.h"
 #include "c.h"
+
+
 // ==========================================
 
-bool double_same(double v1, double v2)
+/*  set_feature_contidion
+    [in] lfi: 需要处理的 LFIndex
+    我们显式地指出, 这里将要使用 feature condition
+ */
+void set_feature_contidion(LFIndex *lfi)
 {
-	double abs0 = (v1 > v2) ? (v1 - v2) : (v2 - v1);
-	double abs1 = (v1 > 0) ? v1 : -v1;
-	double abs2 = (v2 > 0) ? v2 : -v2;
-	if (v1 == 0) return v2 != 0;
-	if (v2 == 0) return v1 != 0;
-	
-	return (100.0 * abs0 < abs1) && (100.0 * abs0 < abs2);
-}
-
-// 判断当前filter是否为infer对应filter，返回 true or false。 
-bool isInferFilter(void *qual) {
-
-	OpExpr *op;
-
-	switch ( ((Node*)qual)->type)
-	{
-		case T_OpExpr:
-		{
-			op = (OpExpr*) qual;
-			if (op->opno == 1755 || op->opno == 1757)
-				return true;
-			return false;
-			break;
-		}
-		default:
-		{
-			return false;
-			break;
-		}
-	}
-	
-	return false;
-}
-
-
-double constvalue_to_double(Datum datum) {
-	double val = convert_numeric_to_scalar(datum, NUMERICOID, NULL);
-	return val;
+    int i;
+    for (i = 1; i <= lfi->feature_num; i += 1)
+    {
+        lfi->min_values[i] = lfi->min_conditions[i];
+        lfi->max_values[i] = lfi->max_conditions[i];
+    }
 }
 
 // 从Query中获得label condition
@@ -367,6 +341,50 @@ List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi)
 
 
 // ***************************
+// Util Functions
+
+bool double_same(double v1, double v2)
+{
+	double abs0 = (v1 > v2) ? (v1 - v2) : (v2 - v1);
+	double abs1 = (v1 > 0) ? v1 : -v1;
+	double abs2 = (v2 > 0) ? v2 : -v2;
+	if (v1 == 0) return v2 != 0;
+	if (v2 == 0) return v1 != 0;
+	
+	return (100.0 * abs0 < abs1) && (100.0 * abs0 < abs2);
+}
+
+// 判断当前filter是否为infer对应filter，返回 true or false。 
+bool isInferFilter(void *qual) {
+
+	OpExpr *op;
+
+	switch ( ((Node*)qual)->type)
+	{
+		case T_OpExpr:
+		{
+			op = (OpExpr*) qual;
+			if (op->opno == 1755 || op->opno == 1757)
+				return true;
+			return false;
+			break;
+		}
+		default:
+		{
+			return false;
+			break;
+		}
+	}
+	
+	return false;
+}
+
+double constvalue_to_double(Datum datum) {
+	double val = convert_numeric_to_scalar(datum, NUMERICOID, NULL);
+	return val;
+}
+
+// ***************************
 // Create Node Functions
 
 Node *create_numeric_var_node_from_int4(int rtb_id, int rtb_col) 
@@ -402,7 +420,6 @@ Const *create_const_node(double up_thd)
 	val = makeFloat(fval);
 	return make_const(NULL, val, -1);
 }
-
 
 // ****************************
 // Create Rstrict

@@ -31,6 +31,7 @@
 #include "utils/float.h"
 
 /* Init_LFIndex 初始化 LFIndex, 其中是所有写死的内容
+ * 
  */
 
 void Init_LFIndex(LFIndex* lfi, Query* parse)
@@ -82,12 +83,7 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
 				break;
 		}
 	}
-    /*
-    for (i = 1; i <= lfi->feature_num; i++)
-    {
-        elog(WARNING, "feature_rel_ids length = %d", lfi->feature_rel_ids[i]->length);
-    }
-    */
+    
     // model weight
     lfi->W[0] = 24.685979;      // const value 1
     lfi->W[1] = -0.0092697;     // title::production_year
@@ -125,20 +121,11 @@ void Init_LFIndex(LFIndex* lfi, Query* parse)
     lfi->split_node_deepest = 1;
 }
 
-/*  set_feature_contidion
-    [in] lfi: 需要处理的 LFIndex
-    我们显式地指出, 这里将要使用 feature condition
+/* Is_feature_relid: 检查 relid 对应的表是否是 feature 表
+ * [in] lfi: 运行时中间信息
+ * [in] relid: 某个表在 rtable 中的序号
+ * [return] a bool value : relid 是否对应着一个 feature
  */
-void set_feature_contidion(LFIndex *lfi)
-{
-    int i;
-
-    for (i = 1; i <= lfi->feature_num; i += 1)
-    {
-        lfi->min_values[i] = lfi->min_conditions[i];
-        lfi->max_values[i] = lfi->max_conditions[i];
-    }
-}
 
 bool Is_feature_relid(LFIndex *lfi, int relid)
 {
@@ -149,8 +136,6 @@ bool Is_feature_relid(LFIndex *lfi, int relid)
     return false;
 }
 
-
-// *************** 关于影子树的实现
 
 /* build_shadow_plan: Build a ShadowPlan Tree from a Plan Tree.
  * [in] curplan: 所要构建的影子树的根节点指针
@@ -167,7 +152,6 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt)
 	res = makeNode(Shadow_Plan);
 	res->spliters = NULL;
 	res->plan = curplan;
-    res->filter_state = 0;
     res->parent = prt;
     res->is_endnode = false;
 
@@ -178,7 +162,6 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt)
 	return res;
 }
 
-
 /* find_sole_op: 一个工具函数, 找到整棵 Plan 树中的那个 Filter
  * 在 JOB 中, 选择找到那个 "小于不等式" 或 "大于不等式" 所对应的 Filter
  * [in] cur: 当前递归栈中所考虑的节点
@@ -186,13 +169,11 @@ Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *prt)
  */
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi) 
 {
-
+    OpExpr *op;
     ListCell *lc;
     NestLoop *nsl;
-    OpExpr *op;
-
-    // 现在只考虑 NestLoop
-    // 如果当前节点是 Join 的话, 则需要考虑它上面的 Filter
+    
+    // 现在只考虑 NestLoop, 如果当前节点是 Join 的话, 则需要考虑它上面的 Filter
     if (IsA(cur->plan, NestLoop))
     {
         nsl = (NestLoop*)cur->plan;
@@ -206,7 +187,6 @@ void find_sole_op(Shadow_Plan *cur, FilterInfo *fi)
                     fi->shadow_roots = lappend(fi->shadow_roots, cur);
                     fi->filter_ops = lappend(fi->filter_ops, op);
                 }
-                    
             }
         }
     }
@@ -227,7 +207,7 @@ void find_sole_op(Shadow_Plan *cur, FilterInfo *fi)
 
 void find_split_node
 (Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2,
-    List **ridlist, List **depthlist) 
+    List **ridlist, List **depthlist, int *max_depth) 
 {
 
     // 当前进行了很大程度上的简化：假定计划树上的节点只有
@@ -239,11 +219,14 @@ void find_split_node
     Shadow_Plan *next_node;
     double next_minrows;
 
+    if (depth2 > (*max_depth))
+        *max_depth = depth2;
+
     // 假定: 即使有Agg, 也只会出现一次, 且在根节点上面
     if (nodeTag(cur_plan->plan) == T_Agg)
     {
         next_node = cur_plan->lefttree;
-        find_split_node(next_node, next_node, next_node->plan->plan_rows, lfi, depth1 + 1, depth2 + 1, ridlist, depthlist);
+        find_split_node(next_node, next_node, next_node->plan->plan_rows, lfi, depth1 + 1, depth2 + 1, ridlist, depthlist, max_depth);
         return;
     }
 	else if (nodeTag(cur_plan->plan) == T_NestLoop) 
@@ -255,9 +238,9 @@ void find_split_node
 			next_node = cur_plan;
 		}
 		if (cur_plan->lefttree != NULL)
-			find_split_node(cur_plan->lefttree, next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist);
+			find_split_node(cur_plan->lefttree, next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist, max_depth);
 		if (cur_plan->righttree != NULL)
-			find_split_node(cur_plan->righttree,  next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist);
+			find_split_node(cur_plan->righttree,  next_node, next_minrows, lfi, depth2, depth2 + 1, ridlist, depthlist, max_depth);
 		return;
 	}
 
@@ -320,7 +303,6 @@ double find_max_value(LFIndex *lfi, int relid) {
  *  min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
  *  [out] deleted_value: 作为结果返回给父节点，是以cur为根的子树中，那些被排除的feature的最小值的总和
  */
-
 
 Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *deleted_value,
     double current_fac, double *factor, double *leftconst) 
@@ -466,164 +448,68 @@ Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi, double *dele
     }
 }
 
-
-/* distribute_joinqual 函数使用 Shadow_plan 进行重写
- * cur: 当前递归处理中的节点
- * op_passed_tome: 来自父亲节点传下来的 OpExpr
- * feature_rel_ids: 本次查询相关的 feature 的 relid 的列表
- * min_values: 本次查询相关的 feature 的最小值，与 feature_rel_ids 一一对应
- */
-
-
-void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth) {
-
-    // 变量定义(为了遵循源代码风格)
-    Plan *lefttree;
-    Plan *righttree;
-    Scan *othertree;
-    NestLoop *nsl;
-
-    Expr *modified_op;
-    OpExpr *middle_result;
-    OpExpr *sub_result;
-
-    double whatever, factor, leftconst; // my fault...
-    int delete_relid;
-    // 变量定义结束
-
-    elog(WARNING, "Function<distribute_non_fuzz>, depth = %d, cur->plan->type = %d\n", depth, cur->plan->type);
-
-    whatever = 0;
-    sub_result = NULL;
-    lefttree = cur->plan->lefttree;
-    righttree = cur->plan->righttree;
-
-    // **如果当前节点为 Split Node，则将父亲节点传下来的 OpExpr 装备到 joinqual 上 **
-    if (cur->spliters != NULL) 
+void greedy_get_filterflags(Shadow_Plan *cur, LFIndex *lfi, int *filter_flags)
+{
+    int count = 0;
+    while (true)
     {
-        elog(WARNING, "depth = %d, entering way [1].\n", depth);
-        nsl = (NestLoop*) cur->plan;
-        if (op_passed_tome != NULL && depth != 1) {
-            nsl->join.joinqual = lappend(nsl->join.joinqual, op_passed_tome);
-        }
-        lfi->split_node_deepest = depth;
-
-
-        if (lefttree->type == T_NestLoop)
-        {
-            elog(WARNING, "depth = %d, entering way [1.1].\n", depth);
-            othertree = (Scan*) cur->plan->righttree;
-            delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
-
-            distribute_non_fuzz(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
-            
-            
-            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth, 1);
-            *subop = middle_result; 
-            
-        }
+        if (cur->spliters != NULL)
+            filter_flags[count] = 1;
+        count += 1;
         
-        else if (righttree->type == T_NestLoop)
-        {
-            elog(WARNING, "depth = %d, entering way [1.2].\n", depth);
-            othertree = (Scan*) cur->plan->lefttree;
-            delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(llast(nsl->join.joinqual), delete_relid, lfi, &whatever, 1, &factor, &leftconst);
-            
-
-            distribute_non_fuzz(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
-
-            
-            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[2].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth, 1);
-            *subop = middle_result; 
-            
-        }
-
-        else // 已经到达叶子
-        { 
-            elog(WARNING, "depth = %d, entering way [1.3].\n", depth);
-            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
-            middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
-            *subop = middle_result; 
-            
-        }
-
-    }
-    else 
-    {
-        elog(WARNING, "depth = %d, entering way [2].\n", depth);
-        if (lefttree->type == T_NestLoop) 
-        {
-            elog(WARNING, "depth = %d, entering way [2.1].\n", depth);
-            othertree = (Scan*) cur->plan->righttree;
-            delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever, 1, &factor, &leftconst);
-            
-            distribute_non_fuzz(cur->lefttree, modified_op, lfi, &sub_result, depth + 1);
-
-            
-            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[4].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth, 1);
-            *subop = middle_result; 
-            
-        }
-        else if (cur->plan->righttree->type == T_NestLoop)
-        {
-            elog(WARNING, "depth = %d, entering way [2.2].\n", depth);
-            othertree = (Scan*) cur->plan->lefttree;
-            delete_relid = othertree->scanrelid;
-            modified_op = copy_and_delete_op(op_passed_tome, delete_relid, lfi, &whatever, 1, &factor, &leftconst);
-            
-            distribute_non_fuzz(cur->righttree, modified_op, lfi, &sub_result, depth + 1);
-
-            
-            elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[5].", depth);
-            middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, op_passed_tome, sub_result, depth, 1);
-            *subop = middle_result; 
-            
-        } 
-        else if(cur->plan->type == T_NestLoop)  // 最后一个 NestLoop 节点
-        {
-            elog(WARNING, "depth = %d, entering way [2.3].\n", depth);
-            elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[6].", depth);
-            middle_result = constrct_targetlist_leaf(cur, lfi, op_passed_tome, depth);
-            *subop = middle_result; 
-            
-            // 作为值返回的 middle_result 可能就是 NULL, 但有对应的处理 
-        }
+        if (IsA(cur->lefttree->plan, NestLoop))
+            cur = cur->lefttree;
+        else if (IsA(cur->righttree->plan, NestLoop))
+            cur = cur->righttree;
         else
-        {
-            elog(WARNING, "depth = %d, entering way [2.4].\n", depth);
-        }
-        // else: cur 是一个 Scan 节点, do nothing
+            break;
     }
 }
 
 
-/*
- *
- * 
- */
-void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi, 
-    int depth, int segmentcounter,
-    OpExpr **subop, int *filter_flags, List *filterlist) 
+void pushdown_get_filterflags(Shadow_Plan *cur, LFIndex *lfi, int *filter_flags)
+{
+    int count = 0;
+    Scan *other;
+    while (true)
+    {
+        if (IsA(cur->lefttree->plan, NestLoop))
+        {
+            other = (Scan*) cur->righttree->plan;
+            if ((IsA(other, IndexScan) || IsA(other, SeqScan)) && Is_feature_relid(lfi, other->scanrelid))
+            {
+                filter_flags[count] += 1;
+            }
+            cur = cur->lefttree;
+        }
+        else if (IsA(cur->righttree->plan, NestLoop))
+        {
+            other = (Scan*) cur->lefttree->plan;
+            if ((IsA(other, IndexScan) || IsA(other, SeqScan)) && Is_feature_relid(lfi, other->scanrelid))
+            {
+                filter_flags[count] += 1;
+            }
+            cur = cur->righttree;
+        }
+        else
+            break;
+        count += 1;
+    }
+}
+
+
+void distribute_by_flag(Shadow_Plan *cur, LFIndex *lfi, 
+                                int depth, int segmentcounter,
+                                OpExpr **subop, int *filter_flags, List *filterlist) 
 {
     // 变量定义(为了遵循源代码风格)
     NestLoop *nsl;
     Shadow_Plan *nesttree;
-    Scan *othertree;
     Plan *lefttree, *righttree;
     OpExpr *middle_result, *sub_result;
 
-    int delete_relid;
     int emplace_filter = (segmentcounter == lfi->feature_num) ? filter_flags[depth] : 0;
     int nextsegment = segmentcounter + (cur->is_endnode ? 1 : 0);
-
-    // 变量定义结束
-    elog(WARNING, "<distribute_joinqual_shadow>, depth = [%d], filter_flags[depth] = [%d]\n", depth, filter_flags[depth]);
 
     sub_result = NULL;
     lefttree = cur->plan->lefttree;
@@ -633,52 +519,23 @@ void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi,
 
     if (lefttree->type == T_NestLoop || righttree->type == T_NestLoop)
     {
-        elog(WARNING, "depth = %d, entering way [1].\n", depth);
-        othertree = (lefttree->type == T_NestLoop) ? (Scan*) cur->plan->righttree : (Scan*) cur->plan->lefttree;
         nesttree = (lefttree->type == T_NestLoop) ? (Shadow_Plan*) cur->lefttree : (Shadow_Plan*) cur->righttree;
-        delete_relid = othertree->scanrelid;
-        
-        if (all_push_down)
-            emplace_filter = Is_feature_relid(lfi, othertree->scanrelid);
 
         if (emplace_filter && depth != 0)
-        {
-            elog(WARNING, ">>>>>>>>>>>>>>>>>>>>>> Filter Placed way1\n");
             nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
-        }
                     
-        distribute_joinqual_shadow(nesttree, lfi, depth + 1, nextsegment, &sub_result, filter_flags, filterlist);
-
-        elog(WARNING, "depth = %d, entering constrct_targetlist_nonleaf[1].", depth);
-
-        
-        // middle_result = construct_targetlist_nonleaf(cur, lfi, delete_relid, linitial(filterlist), sub_result, depth, emplace_filter);
-        // *subop = middle_result;    
-        
+        distribute_by_flag(nesttree, lfi, depth + 1, nextsegment, &sub_result, filter_flags, filterlist);
     }
     else // 已经到达叶子
-    { 
-        elog(WARNING, "depth = %d, entering way [3].\n", depth);
-        elog(WARNING, "depth = %d, entering constrct_targetlist_leaf[3].", depth);
-        
-        if (all_push_down)
-        {
-            if (Is_feature_relid(lfi, ((Scan *)(lefttree))->scanrelid) || 
-                Is_feature_relid(lfi, ((Scan *)(righttree))->scanrelid))
-                emplace_filter = 1;
-        }
+    {   
         if (emplace_filter && depth != 0)
-        {
-            elog(WARNING, ">>>>>>>>>>>>>>>>>>>>>> Filter Placed way2\n");
             nsl->join.joinqual = lappend(nsl->join.joinqual, list_nth(filterlist, segmentcounter));
-        }
         
-        
-        // middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
-        // *subop = middle_result;   
-         
+        middle_result = constrct_targetlist_leaf(cur, lfi, list_nth(filterlist, segmentcounter), depth);
+        *subop = middle_result;   
     }
 }
+
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom, int depth, int emplace_filter)
@@ -690,7 +547,6 @@ OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_
     List *filter_args;
     NestLoop *nsl;
     TargetEntry *tnt;
-
     
     // 需要处理对 delete_relid 的扫描了
     // 这里需要分别处理, 是因为只有在第一次的时候, 需要保留常数
@@ -768,10 +624,6 @@ OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed
     
 }
 
-
-
-// ===========================
-
 Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const) 
 {
     // 变量定义
@@ -842,7 +694,6 @@ Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const)
                 lsecond(res->args) = rresult;
                 return (Expr *)res;
             }
-            
             break;
             
         case 1760:   // '*' for NUMERIC

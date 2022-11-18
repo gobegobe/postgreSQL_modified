@@ -41,7 +41,8 @@
 // ************************** 预处理部分 *******************
 
 
-double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *ridlist, List *depthlist, List** filterlist)
+double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, 
+                           List *ridlist, List *depthlist, List** filterlist)
 {
     int i, j, temp1, temp2, r1, r2;
     int len = ridlist->length;
@@ -58,7 +59,6 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
     List *varlist = NIL;
     Var *obj_var;
 
-    // Const *rhsnode = (Const *) lsecond(((OpExpr *) cur_op)->args);
     double *rightconst = palloc((len + 1) * sizeof(double));
 
     // 保证深度从小到大
@@ -88,9 +88,7 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
     // 根据深度排序：(feature1, feature2, feature3)
     // 移除 feature1 ==> feature2 + featuer3 ...
     // 移除 feature2 ==> feature3 ...
-
     
-    elog(WARNING, "<preprocess_filters>  loop begin.");
     for (i = 0; i < len; i++)
     {
         // res_expr 是完整的 Filter
@@ -109,36 +107,23 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
 
         elog(WARNING, "<preprocess_filters> ridlist[%d] = [%d], factor[i] = [%.15f]", i, list_nth_int(ridlist, i), tempvalue);
 
-        collect_var_info(pni, linitial(((OpExpr *)cur_op)->args)
-            , list_nth_int(ridlist, i), &obj_var, &tempvalue, &tempconst);
+        collect_var_info(pni, linitial(((OpExpr *)cur_op)->args), list_nth_int(ridlist, i), &obj_var);
         varlist = lappend(varlist, obj_var);
-    }
-
-    elog(WARNING, "<preprocess_filters> loop is ok..");
-    elog(WARNING, "<preprocess_filters> varlist->length = [%d]", varlist->length);
-    elog(WARNING, "<preprocess_filters> varlist[0] = [%p]", list_nth(varlist, 0));
-    elog(WARNING, "<preprocess_filters> varno = [%d]", ((Var*)list_nth(varlist, 0))->varno);
-
-    for (i = 0; i < len; i += 1)
-    {
-        elog(WARNING, "<pf> i = [%d], ridlist[i] = [%d], factor[i] = [%.15f], rightconst[i] = [%.15f]",
-            i, list_nth_int(ridlist, i), factorlist[i], rightconst[i]);
     }
     
     // 现在开始计算选择率
     // selectivity_list[] 的定义如下: 
-    
     // selectivity_list[0] 表示共同考虑第 0, 1, 2, 3 个 feature 的选择率 (此时是一个完整的 filter)
-    selectivity_list[0] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 0);
-
     // selectivity_list[1] 表示共同考虑第 1, 2, 3 个 feature 的选择率 (处理掉了第一个 feature)
-    selectivity_list[1] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 1);
-
     // selectivity_list[2] 表示共同考虑第 2, 3 个 feature 的选择率 (处理掉了 2 个 feature)
-    selectivity_list[2] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 2);
+    // selectivity_list[3] 表示只考虑第 3 个 feature 的选择率 (处理掉了 3 个 feature, 只剩下一个 feature)
 
-    // selectivity_list[0] 表示只考虑第 3 个 feature 的选择率 (处理掉了 3 个 feature, 只剩下一个 feature)
-    selectivity_list[3] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, 3);
+
+    for (i = 0; i < len; i += 1)
+    {
+        selectivity_list[i] = calc_selec(pni, lfi, varlist, ridlist, factorlist, len, theconst, rightconst, i);
+    }
+
 
     for (i = 0; i < len; i += 1)
     {
@@ -150,6 +135,7 @@ double *preprocess_filters(PlannerInfo *pni, LFIndex *lfi, Expr *cur_op, List *r
 
     pfree(factorlist);
     pfree(rightconst);
+    
     return selectivity_list;
 }
 
@@ -307,20 +293,13 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
     [in: Expr* cur] 当前递归阶段的节点
     [in: int reserve_relid] 需要进行信息收集的那个列的 relid
     [out: Var*] object_var: reserve_relid 对应的那个 Var* 
-    [out: double] object_ratio: reserve_relid 对应的列的系数
-    [out: double] deleted_value: (deprecated) 这个列所带来的被删除的值(之前使用平均数来统计)
 */
 
-bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
-                    Var **obj_var, double *obj_ratio, double *deleted_value)
+void collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid, Var **obj_var)
 {
     Expr *lefttree;
     Expr *righttree;
-    bool lresult;
-    bool rresult;
-
     OpExpr *opcur;
-    Const *sonconst;
     Var *curvar;
 
     if (IsA(cur, Var))
@@ -330,14 +309,14 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
         if (curvar->varno == reserve_relid)
         {
             *obj_var = curvar;
-            return true;
+            return;
         }    
         else
-            return false;
+            return;
     }
     else if (IsA(cur, Const))
     {
-        return false;
+        return;
     }
     
     opcur = (OpExpr *) cur;
@@ -347,75 +326,20 @@ bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
     switch (opcur->opno)
     {
         case 1758:   // '+' for NUMERIC
-            lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
-            rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
-            
-            if (lresult || rresult)
-                *obj_ratio = 1.0;
-            
-            if (!lresult)
-            {
-                if (IsA(lefttree, Var))
-                {
-                    *deleted_value += query_var_average(root, (Var *) lefttree);
-                }  
-                if (IsA(lefttree, Const))
-                {
-                    sonconst = (Const *) lefttree;
-                    *deleted_value += datum_to_double(sonconst->constvalue);
-                }
-            }
-
-            if (!rresult)
-            {
-                if (IsA(righttree, Var))
-                {
-                    *deleted_value += query_var_average(root, (Var *) righttree);
-                }  
-                if (IsA(righttree, Const))
-                {
-                    sonconst = (Const *) righttree;
-                    *deleted_value += datum_to_double(sonconst->constvalue);
-                }
-            }
-            
-
+            collect_var_info(root, lefttree,  reserve_relid, obj_var);
+            collect_var_info(root, righttree, reserve_relid, obj_var);
             break;
         
         case 1760:   // '*' for NUMERIC;
 
-            lresult = collect_var_info(root, lefttree,  reserve_relid, obj_var, obj_ratio, deleted_value);
-            rresult = collect_var_info(root, righttree, reserve_relid, obj_var, obj_ratio, deleted_value);
-
-            if (lresult)
-            {
-                sonconst = (Const *) righttree;
-                *obj_ratio = datum_to_double(sonconst->constvalue);
-            }
-            else if (rresult)
-            {
-                sonconst = (Const *) lefttree;
-                *obj_ratio = datum_to_double(sonconst->constvalue);
-            }
-            else if (IsA(lefttree, Var))
-            {
-                sonconst = (Const *) righttree;
-                *deleted_value += query_var_average(root, (Var *)lefttree) * datum_to_double(sonconst->constvalue);
-            }
-            else if (IsA(righttree, Var))
-            {
-                sonconst = (Const *) lefttree;
-                *deleted_value += query_var_average(root, (Var *)righttree) * datum_to_double(sonconst->constvalue);
-            }
-            else 
-                elog(WARNING, "<collect_var_info> Well, I do not know what happened.");
+            collect_var_info(root, lefttree,  reserve_relid, obj_var);
+            collect_var_info(root, righttree, reserve_relid, obj_var);
             break;
 
         default:
             elog(WARNING, "I don't think this is a OpExpr, type = [%d]", ((Node *)opcur) -> type);
             elog(WARNING, "<collect_var_info> Detected quirky opno: [%d]", opcur->opno);
     }
-    return false;
 }
 
 
@@ -493,7 +417,7 @@ List *get_segment_table(Shadow_Plan *root, LFIndex *lfi)
 
 
 /* 使用一步决定 filter 的位置 */
-int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
+void dynamic_determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list, int *filter_flags)
 {
     /*
         segment_table (List *) 会保存若干个 (List *)
@@ -528,7 +452,6 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     // 输出结果相关变量
     int current_segment_id = 0;
     int accumulate_node_count = 0;
-    int *flag;
 
     // *********************** Step1: 计算段内部的代价 ***********************
     // index 越大, 代表段越深
@@ -557,8 +480,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
 
     }
     // *********************** 计算段内部的代价 ***********************
-    // here is ok?
-    elog(WARNING, "checkpoint 1 is ok.");
+
     for (i = segment_num - 1; i >= 0; i -= 1)
     {
         const double per_feature_compute_cost = (2 * DEFAULT_CPU_OPERATOR_COST);
@@ -643,14 +565,9 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         }
         
     }
-    elog(WARNING, "checkpoint 2 is ok. [total_node_count] = [%d] ", total_node_count);
     
-    /********************* 求出结果 flag *********************/
+    /********************* 求出结果 filter_flags *********************/
     
-    flag = palloc(total_node_count * sizeof(int));
-    memset(flag, 0, total_node_count * sizeof(int));
-    
-    elog(WARNING, "checkpoint 2.5 is ok.");
     while (true)
     {
         elog(WARNING, "accumulate_node_count = [%d]", accumulate_node_count);
@@ -658,7 +575,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
         elog(WARNING, "transfer_from[current_segment_id] = [%d]", transfer_from[current_segment_id]);
         elog(WARNING, "best_choice_node[current_segment_id] = [%d]", best_choice_node[current_segment_id]);
 
-        flag[accumulate_node_count + best_choice_node[current_segment_id]] = 1;
+        filter_flags[accumulate_node_count + best_choice_node[current_segment_id]] = 1;
         if (transfer_from[current_segment_id] == -1)
             break;
         else
@@ -667,10 +584,7 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
                 accumulate_node_count += ((List *) list_nth(segment_table, j))->length;
             current_segment_id = transfer_from[current_segment_id];
         }
-    }
-
-    elog(WARNING, "checkpoint 3 is ok.");
-    
+    }    
 
     pfree(segment_inner_base_cost);
     pfree(segments_base_cost_sum);
@@ -678,11 +592,10 @@ int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list)
     pfree(transfer_from);
     pfree(best_choice_node);
         
-    elog (WARNING, "flag array  = ");
+    elog (WARNING, "filter_flags array  = ");
     for (i = 0; i < total_node_count; i += 1)
-        elog(WARNING, "flag[%d] = [%d]", i, flag[i]);
+        elog(WARNING, "filter_flags[%d] = [%d]", i, filter_flags[i]);
 
-    return flag;
 }
 
 

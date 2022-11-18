@@ -298,12 +298,8 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 			   *lr;
 
 	Shadow_Plan *shadow;
-	
-	
-
 	LFIndex *lfi;
 	FilterInfo *fi;
-	List *opt_list;
 	
 	/*
 	 * Set up global state for this planner invocation.  This data is needed
@@ -416,25 +412,25 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	}
 
 
-	// (ruilin) 改动起始处
-	elog(WARNING, "Configure condition = [%d] | [%d] | [%d] | [%d].\n", 
-		using_feature_condition_x, using_part_infer_x, forbid_fuzz_optimize, all_push_down);
+	// (ruilin) 改动起始
+	
+	elog(WARNING, " ******** Configure condition as below: \n " 
+	 			  "enable_logical = [%d]\n"
+				  "enable_physical = [%d]\n"
+				  "physical-conf-greedy = [%d]\n"
+				  "physical-conf-pushdown = [%d]\n"
+				  "physical-conf-dynamic = [%d]\n", 
+				  enable_logical, enable_physical, physical_greedy, physical_pushdown, physical_dynamic);
 
-	if (using_feature_condition_x || using_part_infer_x)
+
+	// 计算 LFIndex 并初始化
+	if (enable_logical || enable_physical)
 	{
 		lfi = makeNode(LFIndex);
 		Init_LFIndex(lfi, parse);
+		// if (enable_logical) add_quals_using_label_range(parse, lfi);
 	}
-	
-	
-	elog(WARNING, "check point <0>.");
 
-	/*
-	if (using_feature_condition_x)
-	{
-		add_quals_using_label_range(parse, lfi);
-	}
-	*/
 
 	/* primary planning entry point (may recurse for subqueries) */
 	root = subquery_planner(glob, parse, NULL, false, tuple_fraction);
@@ -443,59 +439,50 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	best_path = get_cheapest_fractional_path(final_rel, tuple_fraction);
 	top_plan = create_plan(root, best_path);
 
-	elog(WARNING, "check point <1>.");
-	/*
-	bool testing = 0;
-	if (testing)
-	{
-		OpExpr *top_op = linitial(((NestLoop *)top_plan)->join.joinqual);		
 		
-		OpExpr *wtvop;
-		wtvop = copy_and_transpose(root, top_op, 5);
 
-	}
-	*/
-
-	if (using_feature_condition_x || using_part_infer_x)
+	if (enable_physical && top_plan->type == T_Agg) 
 	{
-		if (top_plan->type == T_Agg)
-			shadow = build_shadow_plan(top_plan, NULL);
-	}
-		
-	elog(WARNING, "check point <2>.");
-	if (using_part_infer_x && top_plan->type == T_Agg) 
-	{
+		int *filter_flags;
+		double *selectivity_list;
+		int max_depth = 0;
+		OpExpr *placeholder;
 		List *ridlist = NIL;
 		List *depthlist = NIL;
 		List *filterlist = NIL;
-		double *selectivity_list;
-		int *filter_flags;
-		OpExpr *whatever_subop;
+
+		shadow = build_shadow_plan(top_plan, NULL);
 
 		fi = makeNode(FilterInfo);
 		fi->shadow_roots = NULL;
 		fi->filter_ops = NULL;
 		find_sole_op(shadow, fi);	
-		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1, &ridlist, &depthlist);
-
-		if (!forbid_fuzz_optimize) // 02
-		{
-			
-			
-			selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
-
-			filter_flags = determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list);
-			
-			elog(WARNING, "---determine_filter is ok---.");
-			distribute_joinqual_shadow(linitial(fi->shadow_roots), lfi, 0, 0, &whatever_subop, filter_flags, filterlist);
-			elog(WARNING, "---distribute_joinqual_shadow is ok---.");
-		}
-		else // 01
-		{
-			
-			distribute_non_fuzz(linitial(fi->shadow_roots), linitial(fi->filter_ops), lfi, &whatever_subop, 1);
-		}
 		
+		find_split_node(shadow, shadow, shadow->plan->plan_rows, lfi, 1, 1, &ridlist, &depthlist, &max_depth);
+		selectivity_list = preprocess_filters(root, lfi, linitial(fi->filter_ops), ridlist, depthlist, &filterlist);
+
+		elog(WARNING, "Max depth = (%d)", max_depth);
+		filter_flags = palloc(max_depth * sizeof(int));
+		memset(filter_flags, 0, max_depth * sizeof(int));
+
+		if (physical_greedy)
+		{
+			greedy_get_filterflags(linitial(fi->shadow_roots), lfi, filter_flags);
+		}
+		else if (physical_pushdown)
+		{
+			pushdown_get_filterflags(linitial(fi->shadow_roots), lfi, filter_flags);
+		}
+		else if (physical_dynamic)
+		{
+			dynamic_determine_filter(linitial(fi->shadow_roots), lfi, selectivity_list, filter_flags);
+		}
+		else
+		{
+			elog(ERROR, "<Physical MLSQL> When using physical-mlsql, there should be a choice.");
+		}
+			
+		distribute_by_flag(linitial(fi->shadow_roots), lfi, 0, 0, &placeholder, filter_flags, filterlist);
 	}
 	
 

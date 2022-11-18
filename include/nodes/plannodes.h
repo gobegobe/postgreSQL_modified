@@ -172,21 +172,7 @@ typedef struct Plan
 
 
 
-/* ----------------
- * Shadow Plan Node
- */
-typedef struct Shadow_Plan {
-	NodeTag type;
-	Plan *plan;
 
-	List *spliters;
-	int filter_state;
-	bool is_endnode;
-	
-	struct Shadow_Plan *parent;
-	struct Shadow_Plan *lefttree;
-	struct Shadow_Plan *righttree;
-} Shadow_Plan;
 
 /* ----------------
  *	 Result node -

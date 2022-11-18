@@ -69,10 +69,11 @@ extern PGDLLIMPORT bool enable_partition_pruning;
 extern PGDLLIMPORT bool enable_async_append;
 extern PGDLLIMPORT int constraint_exclusion;
 
-extern PGDLLIMPORT bool using_feature_condition_x;
-extern PGDLLIMPORT bool using_part_infer_x;
-extern PGDLLIMPORT bool forbid_fuzz_optimize;
-extern PGDLLIMPORT bool all_push_down;
+extern PGDLLIMPORT bool enable_logical;
+extern PGDLLIMPORT bool enable_physical;
+extern PGDLLIMPORT bool physical_greedy;
+extern PGDLLIMPORT bool physical_pushdown;
+extern PGDLLIMPORT bool physical_dynamic;
 
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,
 								  double index_pages, PlannerInfo *root);

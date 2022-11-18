@@ -151,10 +151,11 @@ bool		enable_parallel_hash = true;
 bool		enable_partition_pruning = true;
 bool		enable_async_append = true;
 
-bool		using_feature_condition_x = false;
-bool		using_part_infer_x = false;
-bool		forbid_fuzz_optimize = false;
-bool 		all_push_down = false;
+bool		enable_logical = false;
+bool		enable_physical = false;
+bool		physical_greedy = false;
+bool 		physical_pushdown = false;
+bool 		physical_dynamic = false;
 
 typedef struct
 {

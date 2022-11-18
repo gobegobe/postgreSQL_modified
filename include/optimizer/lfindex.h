@@ -9,7 +9,9 @@
 
 #include "optimizer/plannode_function.h"
 
-// LabelFeatureIndex
+// A private struct in lfindex.h / lfindex.c
+// Store intermediate values, and will finally store its value into LFInfo struct
+
 typedef struct RangeInfo {
     NodeTag type;
 
@@ -33,22 +35,34 @@ typedef struct RangeInfo {
 	
 } RangeInfo;
 
-bool isInferFilter(void *qual);
+
+// =========================================================
+// **************** Cauculation Functions
+
+void set_feature_contidion(LFIndex *lfi);
 
 List *get_label_condition(Query *parse);
-
-double constvalue_to_double(Datum datum);
 
 void add_quals_using_label_range(Query *parse, LFIndex *lfi);
 
 List *compute_lf_index(RangeInfo *label_condition, LFIndex *lfi);
 
+
+// =========================================================
+// **************** Util Functions
+
+bool double_same(double v1, double v2);
+
+bool isInferFilter(void *qual);
+
+double constvalue_to_double(Datum datum);
+
 // =========================================================
 // **************** Create Node Functions
 
-Node *create_numeric_var_node_from_numeric(int rtb_id, int rtb_col);
-
 Node *create_numeric_var_node_from_int4(int rtb_id, int rtb_col);
+
+Node *create_numeric_var_node_from_numeric(int rtb_id, int rtb_col);
 
 Const *create_const_node(double up_thd);
 

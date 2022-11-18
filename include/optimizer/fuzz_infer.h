@@ -44,12 +44,9 @@ double calc_selec(PlannerInfo *pni, LFIndex *lfi, List *varlist, List *ridlist, 
     被 copy_and_transpose 调用的子函数
     我们需要收集以下几个信息：
     *obj_var       ->  varno = reverve_relid 的那个 Var*
-    *obj_ratio     ->  上述 Var 对应的系数
-    *deleted_value ->  除去这个 Var 之后，其余的那些行, 它们的均值之和
 */
 
-bool collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid,
-                    Var **obj_var, double *obj_ratio, double *deleted_value);
+void collect_var_info(PlannerInfo *root, Expr *cur, int reserve_relid, Var **obj_var);
 
 
 
@@ -59,7 +56,7 @@ Const *create_const_from_double(double v);
 
 double get_join_cost(Shadow_Plan *cur_node);
 
-int *determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list);
+void dynamic_determine_filter(Shadow_Plan *root, LFIndex *lfi, double *selectivity_list, int *filter_flags);
 
 List *get_segment_table(Shadow_Plan *root, LFIndex *lfi);
 

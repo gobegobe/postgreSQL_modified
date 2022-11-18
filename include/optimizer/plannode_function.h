@@ -8,6 +8,25 @@
 #include "nodes/nodes.h"
 
 
+/* ----------------------------------------------------------------
+ * Shadow Plan Node
+ */
+typedef struct Shadow_Plan {
+	NodeTag type;
+	Plan *plan;
+
+	List *spliters;
+	bool is_endnode;
+	
+	struct Shadow_Plan *parent;
+	struct Shadow_Plan *lefttree;
+	struct Shadow_Plan *righttree;
+} Shadow_Plan;
+
+/* ----------------------------------------------------------------
+ * LFIndex : 保存运行时所需的所有中间信息
+ */
+
 typedef struct LFIndex {
     NodeTag type;
     int feature_num;
@@ -31,7 +50,10 @@ typedef struct LFIndex {
 
 } LFIndex;
 
-bool Is_feature_relid(LFIndex *lfi, int relid);
+/* ----------------------------------------------------------------
+ * FilterInfo : 为未来预留的接口: 保存所有看到的初始 Filter
+ * 如果未来要对两个 Filter 进行下推的话, 应该从这里取
+ */
 
 typedef struct FilterInfo {
     NodeTag type;
@@ -40,49 +62,51 @@ typedef struct FilterInfo {
                              // 注意, 这里使用双列表设计的原因是一个 shadow_root 可能对应多个 filter
 } FilterInfo;
 
-bool double_same(double v1, double v2);
+
+// ---------- LFIndex Functions -----------------------------------
 
 void Init_LFIndex(LFIndex* lfi, Query* parse);
 
-void set_feature_contidion(LFIndex *lfi);
+// ---------- Util Functions -----------------------------------
+
+bool Is_feature_relid(LFIndex *lfi, int relid);
 
 Shadow_Plan *build_shadow_plan(Plan *curplan, Shadow_Plan *parent);
 
 void find_sole_op(Shadow_Plan *cur, FilterInfo *fi);
 
-void find_split_node
-(Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2,
-    List **ridlist, List **depthlist);
-
+void find_split_node (Shadow_Plan *cur_plan, Shadow_Plan *minrows_node, double min_rows, LFIndex *lfi, int depth1, int depth2,
+    List **ridlist, List **depthlist, int *max_depth);
 
 double find_min_value(LFIndex *lfi, int relid);
+
 double find_max_value(LFIndex *lfi, int relid);
 
-Const *copy_const_withdelta(Const *cur, double delta);
+// ---------- Filter-distribute Functions -----------------------------------
 
 Expr *copy_and_delete_op(Expr *cur, int delete_relid, LFIndex *lfi,
     double *deleted_value, double current_fac, double *factor, double *leftconst);
 
-void distribute_joinqual_shadow(Shadow_Plan *cur, LFIndex *lfi, 
+void pushdown_get_filterflags(Shadow_Plan *cur, LFIndex *lfi, int *filter_flags);
+
+void greedy_get_filterflags(Shadow_Plan *cur, LFIndex *lfi, int *filter_flags);
+
+void distribute_by_flag(Shadow_Plan *cur, LFIndex *lfi, 
     int depth, int segmentcounter,
     OpExpr **subop, int *filter_flags, List *filterlist);
 
-void distribute_non_fuzz(Shadow_Plan *cur, Expr *op_passed_tome, LFIndex *lfi, OpExpr **subop, int depth);
+// ---------- Middle-result-passing Functions -----------------------------------
+// 以下三个函数为传递中间结果而设计
 
 OpExpr *construct_targetlist_nonleaf(Shadow_Plan *cur, LFIndex *lfi, int delete_relid, 
     Expr *op_passed_tome, OpExpr *res_from_bottom, int depth, int emplace_filter);
 
-
 OpExpr *constrct_targetlist_leaf(Shadow_Plan *cur, LFIndex *lfi, Expr *op_passed_tome, int depth);
-
-// 关于查找 feature 初始值
-OpExpr *make_restrict(OpExpr *op, bool use_max, int lmt);
 
 Expr *copy_and_reserve(Expr *cur, int reserve_relid, bool reserve_const) ;
 
-// 关于建立节点
+// ---------- Node creating Functions -----------------------------------
 
-Const *my_make_const(int value);
-
+Const *copy_const_withdelta(Const *cur, double delta);
 
 #endif

@@ -954,42 +954,52 @@ static const unit_conversion time_unit_conversion_table[] =
 static struct config_bool ConfigureNamesBool[] =
 {
 	{
-		{"using_feature_condition_x", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("(Ruilin Configure) using feature conditions."),
+		{"enable_logical", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using enable_logical."),
 			NULL,
 			GUC_EXPLAIN
 		},
-		&using_feature_condition_x,
+		&enable_logical,
 		false,
 		NULL, NULL, NULL
 	},
 	{
-		{"using_part_infer_x", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("(Ruilin Configure) using part_infer."),
+		{"enable_physical", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using enable_physical."),
 			NULL,
 			GUC_EXPLAIN
 		},
-		&using_part_infer_x,
+		&enable_physical,
 		false,
 		NULL, NULL, NULL
 	},
 	{
-		{"forbid_fuzz_optimize", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("(Ruilin Configure) using forbid_fuzz_optimize."),
+		{"physical_greedy", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using physical_greedy."),
 			NULL,
 			GUC_EXPLAIN
 		},
-		&forbid_fuzz_optimize,
+		&physical_greedy,
 		false,
 		NULL, NULL, NULL
 	},
 	{
-		{"all_push_down", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("(Ruilin Configure) using all_push_down."),
+		{"physical_pushdown", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using physical_pushdown."),
 			NULL,
 			GUC_EXPLAIN
 		},
-		&all_push_down,
+		&physical_pushdown,
+		false,
+		NULL, NULL, NULL
+	},
+	{
+		{"physical_dynamic", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("(Ruilin Configure) using physical_dynamic."),
+			NULL,
+			GUC_EXPLAIN
+		},
+		&physical_dynamic,
 		false,
 		NULL, NULL, NULL
 	},
